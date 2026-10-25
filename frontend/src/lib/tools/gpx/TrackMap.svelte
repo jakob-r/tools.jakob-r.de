@@ -245,13 +245,18 @@
 
 	let drag = $state<{ x: number; y: number } | null>(null);
 
+	// Touch is handled by the touch listeners below; a tap only picks the hovered point.
 	function pointerdown(e: PointerEvent) {
+		if (e.pointerType === 'touch') {
+			if (view) hover = nearest(e.offsetX, e.offsetY);
+			return;
+		}
 		canvas.setPointerCapture(e.pointerId);
 		drag = { x: e.clientX, y: e.clientY };
 	}
 
 	function pointermove(e: PointerEvent) {
-		if (!view) return;
+		if (!view || e.pointerType === 'touch') return;
 		if (drag) {
 			view = {
 				...view,
@@ -277,30 +282,83 @@
 		return found;
 	}
 
+	/** Zoom so the world point under `from` ends up under `to`, scaled by `factor`. */
+	function zoomAround(base: View, from: XY, to: XY, factor: number): View {
+		const wx = base.cx + (from.x - width / 2) / base.scale;
+		const wy = base.cy - (from.y - height / 2) / base.scale;
+		const scale = Math.min(50, Math.max(1e-4, base.scale * factor));
+		return { scale, cx: wx - (to.x - width / 2) / scale, cy: wy + (to.y - height / 2) / scale };
+	}
+
+	// When the panes are stacked the page scrolls, so one finger scrolls it and two fingers move
+	// the map. Side by side nothing scrolls, so one finger pans as well.
+	// Matches Tailwind's `md` breakpoint used by the layout in Tool.svelte.
+	let windowWidth = $state(0);
+	const stacked = $derived(windowWidth < 768);
+
+	type Gesture = { base: View; mid: XY; dist: number };
+	let gesture: Gesture | null = null;
+
+	function touchState(e: TouchEvent): { mid: XY; dist: number } {
+		const r = canvas.getBoundingClientRect();
+		const [a, b = a] = [...e.touches];
+		return {
+			mid: { x: (a.clientX + b.clientX) / 2 - r.left, y: (a.clientY + b.clientY) / 2 - r.top },
+			dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+		};
+	}
+
+	function touchstart(e: TouchEvent) {
+		if (!view || (stacked && e.touches.length < 2)) return (gesture = null);
+		e.preventDefault();
+		gesture = { base: view, ...touchState(e) };
+	}
+
+	function touchmove(e: TouchEvent) {
+		if (!gesture) return;
+		e.preventDefault();
+		const now = touchState(e);
+		const factor = gesture.dist > 0 && now.dist > 0 ? now.dist / gesture.dist : 1;
+		view = zoomAround(gesture.base, gesture.mid, now.mid, factor);
+	}
+
+	// Lifting one of two fingers continues as a one-finger pan (side by side) or ends the gesture.
+	const touchend = (e: TouchEvent) => (e.touches.length ? touchstart(e) : (gesture = null));
+
+	$effect(() => {
+		// Svelte's ontouch* attributes are passive; preventDefault needs real listeners.
+		const opts = { passive: false };
+		canvas.addEventListener('touchstart', touchstart, opts);
+		canvas.addEventListener('touchmove', touchmove, opts);
+		canvas.addEventListener('touchend', touchend);
+		canvas.addEventListener('touchcancel', touchend);
+		return () => {
+			canvas.removeEventListener('touchstart', touchstart);
+			canvas.removeEventListener('touchmove', touchmove);
+			canvas.removeEventListener('touchend', touchend);
+			canvas.removeEventListener('touchcancel', touchend);
+		};
+	});
+
 	function wheel(e: WheelEvent) {
 		if (!view) return;
 		e.preventDefault();
-		const f = Math.exp(-e.deltaY * 0.0015);
-		const mx = (e.offsetX - width / 2) / view.scale + view.cx;
-		const my = -(e.offsetY - height / 2) / view.scale + view.cy;
-		const scale = Math.min(50, Math.max(1e-4, view.scale * f));
-		view = {
-			scale,
-			cx: mx - (e.offsetX - width / 2) / scale,
-			cy: my + (e.offsetY - height / 2) / scale
-		};
+		const at = { x: e.offsetX, y: e.offsetY };
+		view = zoomAround(view, at, at, Math.exp(-e.deltaY * 0.0015));
 	}
 </script>
+
+<svelte:window bind:innerWidth={windowWidth} />
 
 <div class="relative min-h-0 flex-1" bind:clientWidth={width} bind:clientHeight={height}>
 	<canvas
 		bind:this={canvas}
-		class="absolute inset-0 size-full touch-none {drag ? 'cursor-grabbing' : 'cursor-grab'}"
-		style="width: {width}px; height: {height}px"
+		class="absolute inset-0 size-full {drag ? 'cursor-grabbing' : 'cursor-grab'}"
+		style="width: {width}px; height: {height}px; touch-action: {stacked ? 'pan-y' : 'none'}"
 		onpointerdown={pointerdown}
 		onpointermove={pointermove}
 		onpointerup={() => (drag = null)}
-		onpointerleave={() => (hover = null)}
+		onpointerleave={(e) => e.pointerType !== 'touch' && (hover = null)}
 		onwheel={wheel}
 		ondblclick={fit}
 		aria-label="{variant} track map"

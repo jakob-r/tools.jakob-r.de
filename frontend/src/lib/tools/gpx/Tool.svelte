@@ -142,7 +142,7 @@
 	}}
 />
 
-<div class="relative flex h-full flex-col">
+<div class="relative flex min-h-full flex-col md:h-full">
 	<div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-white px-4 py-2 text-sm">
 		<h1 class="font-semibold whitespace-nowrap">GPX Cleaner</h1>
 		<InfoHint
@@ -159,8 +159,7 @@
 		{#if src}
 			<label class="ml-2 flex items-center gap-1.5 text-xs whitespace-nowrap">
 				<input type="checkbox" bind:checked={tiles} class="accent-accent" />
-				Map background
-				<span class="text-mute">(loads tiles from openstreetmap.org)</span>
+				Load Map from openstreetmap.org
 				<InfoHint
 					text="Off by default. When on, your browser requests map images from the OpenStreetMap Foundation's tile servers. They see your IP address and which area you are looking at, never the GPX file itself."
 				/>
@@ -168,7 +167,7 @@
 		{/if}
 
 		{#if before && after}
-			<dl class="ml-auto flex gap-4 text-xs">
+			<dl class="ml-auto flex flex-wrap gap-x-4 gap-y-1 text-xs">
 				{#each metrics as m}
 					<div>
 						<dt class="text-mute">{m.label}</dt>
@@ -196,9 +195,9 @@
 	{/if}
 
 	{#if src && result}
-		<div class="grid min-h-0 flex-1 grid-cols-2 gap-3 p-3 pb-0">
+		<div class="grid gap-3 p-3 pb-0 md:min-h-0 md:flex-1 md:grid-cols-2">
 			{#each ['original', 'cleaned'] as const as variant, i}
-				<section class="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-white">
+				<section class="flex h-[55svh] min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-white md:h-auto">
 					<div class="flex shrink-0 items-center gap-3 border-b border-line bg-slate-50 px-3 py-1.5 text-xs">
 						{#if variant === 'original'}
 							<span class="font-medium"><span class="text-orange-500">●</span> Original</span>
@@ -236,8 +235,8 @@
 			{/each}
 		</div>
 
-		<div class="m-3 flex h-48 shrink-0 overflow-hidden rounded-xl border border-line bg-white">
-			<div class="flex w-60 shrink-0 flex-col gap-2 border-r border-line bg-slate-50 p-3 text-xs">
+		<div class="m-3 flex shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-white md:h-48 md:flex-row">
+			<div class="flex shrink-0 flex-col gap-2 border-b border-line bg-slate-50 p-3 text-xs md:w-60 md:border-r md:border-b-0">
 				<label class="flex flex-col gap-1">
 					<span class="flex items-center gap-1.5 text-mute">
 						Activity profile
@@ -272,7 +271,7 @@
 					</label>
 				{/each}
 			</div>
-			<div class="flex min-w-0 flex-1 flex-col">
+			<div class="flex h-44 min-w-0 flex-col md:h-auto md:flex-1">
 				<div class="flex shrink-0 items-center gap-3 px-3 pt-1.5 text-xs text-mute">
 					<span><span class="text-slate-300">■</span> elevation</span>
 					{#if analysis.hasTime}<span><span class="text-accent">—</span> speed</span>{/if}

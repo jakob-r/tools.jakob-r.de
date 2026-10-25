@@ -73,6 +73,7 @@ The **GPX Cleaner** is a web-based, automated utility designed to repair and opt
 ##### 2.1 Core Layout
 
 * **Top Bar:** File upload (Drag & Drop), Export button, and global stats comparison (Original vs. Cleaned: Distance, Time, Elevation, Point Count).
+* **Mobile:** the panes stack vertically (original above cleaned), and the bottom panel stacks its controls above the chart.
 * **Main Stage (Split View):**
 * **Left Pane:** Original Track (Red/Orange styling, showing all messy data and spikes).
 * **Right Pane:** Cleaned Track (Blue/Green styling).

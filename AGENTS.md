@@ -23,3 +23,7 @@ Agents should always create or update the root `Makefile` so running the project
 We use git, all on the main branch.
 Agents commit and push to the main branch regularly.
 If you encounter unstaged changes, commit them when it looks like they were simply left uncommitted. Otherwise ask the user to commit.
+
+## Naming
+
+The Markdown Converter tool is called **Markshift** (slug `markdown`).

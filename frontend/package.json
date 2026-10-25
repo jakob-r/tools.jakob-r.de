@@ -1,0 +1,37 @@
+{
+  "name": "tools-jakob-r-de",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "^4.0.0",
+    "@sveltejs/kit": "^3.1.0",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/turndown": "^5.0.6",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.7",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5"
+  },
+  "dependencies": {
+    "marked": "^18.1.1",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
+  },
+  "imports": {
+    "#lib/*.ts": "./src/lib/*.ts",
+    "#lib/*.svelte": "./src/lib/*.svelte",
+    "#lib/*": [
+      "./src/lib/*.ts",
+      "./src/lib/*"
+    ]
+  }
+}

@@ -37,10 +37,16 @@ Planned tools (behavior is specified in `IDEA.md`):
 
 | Slug | Route | Architectural notes |
 | --- | --- | --- |
-| `markdown` | `/markdown` | Markdown, HTML, and rich text. Local parser and highlighter only. Horizontal or vertical split. |
+| `markdown` | `/markdown` | **Markshift** (implemented). Markdown, HTML, and rich text; each pane picks its format. `marked` (MD→HTML), `turndown` + gfm plugin (HTML→MD), own small highlighter (textarea over `<pre>`), own HTML sanitizer. Route is `ssr = false` (DOMParser, contenteditable). Horizontal or vertical split. |
 | `base64` | `/base64` | Text and binary. Horizontal split only. Payload lives in the URL hash (`#...`), never the query string, so it is not sent to the host. Editing either pane updates the hash. If the decoded value is a URL, show a link that opens in a new tab. |
 | `json` | `/json` | Format, validate, minify, or pretty-print. Local file open/save and clipboard. Horizontal or vertical split. |
 | `json-diff` | `/json-diff` | Two JSON panes, beautified on load. Recursive key sort and ignore-case are local view options. Horizontal or vertical split. |
+
+## SvelteKit 3 notes
+
+- Config lives in `frontend/vite.config.ts` (`sveltekit({ adapter })`); there is no `svelte.config.js`.
+- `$lib` is gone: use the subpath import `#lib/...` (mapped in `frontend/package.json` `imports`).
+- TypeScript is pinned to 5.x; SvelteKit 3.1 does not work with TypeScript 7 yet.
 
 ## Pane Sync
 
@@ -49,6 +55,7 @@ Tools with two panes treat either side as editable.
 - A change on one side recomputes the other.
 - Guard the update so the write-back does not loop.
 - Invalid input stays visible in the pane that has it. The other pane shows the error and does not present a successful conversion.
+- Only syntax errors that make the conversion meaningless (e.g. unbalanced HTML tags) are `error`s and block the sync; softer problems are `warning`s. The rich-text pane sanitizes everything it emits.
 - Syntax highlighting is local and light, and it marks errors inline. Do not load a highlighter from a CDN.
 
 Clipboard and files use browser APIs only (`navigator.clipboard`, `<input type="file">`, download, or the File System Access API). Nothing is uploaded.

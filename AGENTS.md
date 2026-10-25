@@ -28,4 +28,6 @@ If you encounter unstaged changes, commit them when it looks like they were simp
 
 ## Naming
 
-The Markdown Converter tool is called **Markshift** (slug `markdown`).
+A tool's name is the source of truth. Its slug is the kebab-case form of the name, and its route, module folder (`frontend/src/lib/tools/<slug>/`), thumbnail (`frontend/static/tools/<slug>.svg`), and registry entry all use that slug. Renaming a tool means renaming all of these together.
+
+The Markdown Converter tool is called **Markshift** (slug `markshift`).

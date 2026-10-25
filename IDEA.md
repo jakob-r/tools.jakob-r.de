@@ -25,7 +25,7 @@ Design:
 
 ## Tools
 
-### Markdown Converter
+### Markshift
 
 - Converts between Markdown, HTML and rich text
 - Two panes: Input and Output

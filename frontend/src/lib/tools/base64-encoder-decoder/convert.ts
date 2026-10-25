@@ -1,4 +1,4 @@
-/** UTF-8 text ↔ Base64, plus helpers for URL hashes and pasted data URLs. */
+/** UTF-8 text ↔ Base64, plus helpers for URLs that embed a Base64 segment. */
 
 export type DecodeOk = {
 	ok: true;
@@ -11,8 +11,25 @@ export type DecodeErr = { ok: false; error: string };
 
 export type DecodeResult = DecodeOk | DecodeErr;
 
+/** How the Base64 alphabet / padding appeared in the source, so we can write it back the same way. */
+export type Base64Style = {
+	urlSafe: boolean;
+	/** Whether the original included `=` padding. */
+	pad: boolean;
+};
+
+export type EmbeddedBase64 = {
+	prefix: string;
+	base64: string;
+	suffix: string;
+	style: Base64Style;
+};
+
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
+
+/** Path/query segments shorter than this are ignored (avoids matching ids like `abcd`). */
+const MIN_EMBEDDED_LEN = 16;
 
 function bytesToBinaryString(bytes: Uint8Array): string {
 	const chunk = 0x8000;
@@ -37,6 +54,26 @@ export function encodeBytes(bytes: Uint8Array): string {
 /** Encode a UTF-8 string to Base64. */
 export function encodeText(text: string): string {
 	return encodeBytes(textEncoder.encode(text));
+}
+
+export function detectBase64Style(raw: string): Base64Style {
+	const compact = raw.replace(/\s+/g, '');
+	return {
+		urlSafe: /[-_]/.test(compact) && !/[+/]/.test(compact),
+		pad: /=/.test(compact)
+	};
+}
+
+/** Encode bytes using the same alphabet / padding style as the source. */
+export function encodeBytesWithStyle(bytes: Uint8Array, style: Base64Style): string {
+	let s = encodeBytes(bytes);
+	if (!style.pad) s = s.replace(/=+$/, '');
+	if (style.urlSafe) s = s.replace(/\+/g, '-').replace(/\//g, '_');
+	return s;
+}
+
+export function encodeTextWithStyle(text: string, style: Base64Style): string {
+	return encodeBytesWithStyle(textEncoder.encode(text), style);
 }
 
 /**
@@ -90,28 +127,78 @@ export function looksLikeBase64(s: string): boolean {
 	return decodeBase64(compact).ok;
 }
 
+function isEmbeddedCandidate(s: string): boolean {
+	const compact = s.replace(/\s+/g, '');
+	if (compact.length < MIN_EMBEDDED_LEN) return false;
+	if (!looksLikeBase64(compact)) return false;
+	// Prefer payloads that decode to text — path ids that happen to be valid Base64 are rare at this length.
+	const decoded = decodeBase64(compact);
+	return decoded.ok && decoded.text !== null;
+}
+
+function wrapAt(input: string, base64: string): EmbeddedBase64 | null {
+	const i = input.indexOf(base64);
+	if (i < 0) return null;
+	return {
+		prefix: input.slice(0, i),
+		base64,
+		suffix: input.slice(i + base64.length),
+		style: detectBase64Style(base64)
+	};
+}
+
 /**
- * Pull a Base64 payload out of a pasted data URL or a link whose hash is Base64
- * (including this tool's share URLs). Returns null when nothing usable is found.
+ * Find a Base64 payload in pasted text: bare Base64, data URL, hash, or a path/query
+ * segment inside a normal http(s) link. Returns prefix/suffix so only the Base64
+ * part is rewritten when the decoded data changes.
  */
-export function extractBase64FromPaste(input: string): string | null {
+export function findEmbeddedBase64(input: string): EmbeddedBase64 | null {
 	const trimmed = input.trim();
 	if (!trimmed) return null;
 
 	const dataUrl = /^data:[^;,\s]*;base64,([\s\S]+)$/i.exec(trimmed);
 	if (dataUrl) {
 		const payload = dataUrl[1].trim();
-		return decodeBase64(payload).ok ? normalizeBase64(payload) : null;
+		if (decodeBase64(payload).ok) return wrapAt(trimmed, dataUrl[1]) ?? wrapAt(trimmed, payload);
 	}
+
+	let best: EmbeddedBase64 | null = null;
+	const consider = (value: string) => {
+		if (!isEmbeddedCandidate(value)) return;
+		const found = wrapAt(trimmed, value);
+		if (!found) return;
+		if (!best || found.base64.length > best.base64.length) best = found;
+	};
 
 	try {
 		const url = new URL(trimmed);
-		if (url.hash.length > 1) {
-			const hash = decodeURIComponent(url.hash.slice(1));
-			if (looksLikeBase64(hash)) return normalizeBase64(hash);
+		if (url.protocol === 'http:' || url.protocol === 'https:') {
+			if (url.hash.length > 1) {
+				const rawHash = url.hash.slice(1);
+				consider(rawHash);
+				try {
+					consider(decodeURIComponent(rawHash));
+				} catch {
+					// ignore malformed escape sequences
+				}
+			}
+
+			for (const seg of url.pathname.split('/')) {
+				if (seg) consider(seg);
+			}
+
+			for (const value of url.searchParams.values()) {
+				consider(value);
+			}
 		}
 	} catch {
-		// Not a URL — fall through.
+		// Not a URL — fall through to bare Base64.
+	}
+
+	if (best) return best;
+
+	if (looksLikeBase64(trimmed)) {
+		return { prefix: '', base64: trimmed, suffix: '', style: detectBase64Style(trimmed) };
 	}
 
 	return null;

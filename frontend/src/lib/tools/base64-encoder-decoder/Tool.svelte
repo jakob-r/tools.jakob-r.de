@@ -13,6 +13,8 @@
 		normalizeBase64,
 		type Base64Style
 	} from './convert';
+	import { canonicalFromPlain, viewForDecodedText } from './json';
+	import PlainEditor from './PlainEditor.svelte';
 
 	const samplePlain = 'Hello, Base64!\n\nEdit either pane — the other follows.\nShare via the URL hash.';
 	const sampleB64 = encodeText(samplePlain);
@@ -20,6 +22,7 @@
 
 	let plain = $state(samplePlain);
 	let encoded = $state(sampleB64);
+	let isJson = $state(false);
 	/** Surroundings of an embedded Base64 segment (e.g. URL path before/after the payload). */
 	let prefix = $state('');
 	let suffix = $state('');
@@ -50,6 +53,15 @@
 		return prefix + b64 + suffix;
 	}
 
+	function setPlainFromDecodedText(text: string) {
+		const view = viewForDecodedText(text);
+		plain = view.display;
+		isJson = view.isJson;
+		// Keep original decoded bytes so the left pane is not rewritten until the user edits.
+		bytes = new TextEncoder().encode(text);
+		return view.canonical;
+	}
+
 	function applyDecoded(b64: string, source: 'plain' | 'encoded' | 'hash' | 'file') {
 		const result = decodeBase64(b64);
 		if (result.ok === false) {
@@ -62,13 +74,14 @@
 		}
 		error = null;
 		blockedFrom = null;
-		bytes = result.bytes;
 		if (result.text !== null) {
-			plain = result.text;
+			setPlainFromDecodedText(result.text);
 			binary = false;
 			if (fileName === 'decoded.bin') fileName = 'decoded.txt';
 		} else {
 			plain = '';
+			isJson = false;
+			bytes = result.bytes;
 			binary = true;
 			if (fileName === 'decoded.txt') fileName = 'decoded.bin';
 		}
@@ -104,11 +117,24 @@
 			writeHash(encoded);
 			return;
 		}
+
+		const canon = canonicalFromPlain(plain);
+		if (canon.ok === false) {
+			// Looks like JSON but is broken — keep the Base64 side until it parses again.
+			if (isJson || plain.trim().startsWith('{') || plain.trim().startsWith('[')) {
+				error = canon.error;
+				blockedFrom = 'plain';
+				return;
+			}
+		}
+
 		error = null;
 		blockedFrom = null;
 		binary = false;
-		bytes = new TextEncoder().encode(plain);
-		const b64 = wrapped ? encodeTextWithStyle(plain, b64Style) : encodeText(plain);
+		const text = canon.ok ? canon.text : plain;
+		isJson = canon.ok ? canon.isJson : false;
+		bytes = new TextEncoder().encode(text);
+		const b64 = wrapped ? encodeTextWithStyle(text, b64Style) : encodeText(text);
 		if (!wrapped) b64Style = defaultStyle;
 		encoded = composeEncoded(b64);
 		fileName = 'decoded.txt';
@@ -167,17 +193,18 @@
 		if (!file) return;
 		clearWrapper();
 		const buf = new Uint8Array(await file.arrayBuffer());
-		bytes = buf;
-		encoded = encodeBytes(buf);
 		fileName = file.name || 'decoded.bin';
 		error = null;
 		blockedFrom = null;
+		encoded = encodeBytes(buf);
 		const result = decodeBase64(encoded);
 		if (result.ok && result.text !== null) {
-			plain = result.text;
+			setPlainFromDecodedText(result.text);
 			binary = false;
 		} else {
 			plain = '';
+			isJson = false;
+			bytes = buf;
 			binary = true;
 		}
 		writeHash(encoded);
@@ -202,7 +229,7 @@
 	<div class="flex shrink-0 items-center gap-2 border-b border-line bg-white px-4 py-2 text-sm">
 		<h1 class="font-semibold">Base64 Encoder / Decoder</h1>
 		<InfoHint
-			text="Edit either pane — plain text and Base64 stay in sync. Paste a link that embeds Base64 (path, query, hash, or data URL): only that segment is decoded and rewritten when you edit. The payload also lives in this page's URL hash so you can share it without sending data to the server."
+			text="Base64 (or a link with an embedded Base64 segment) on the left, decoded text on the right. JSON is shown pretty-printed with light highlighting; the Base64 side stays minified. Paste a link that embeds Base64 (path, query, hash, or data URL) and only that segment is rewritten when you edit."
 		/>
 		{#if openUrl}
 			<a
@@ -245,16 +272,46 @@
 		<SplitPane orientation="horizontal">
 			{#snippet first()}
 				<div class="flex shrink-0 items-center gap-2 border-b border-line bg-slate-50 px-3 py-1.5 text-xs">
-					<span class="font-medium text-mute">Plain</span>
+					<span class="font-medium text-mute">{wrapped ? 'URL' : 'Base64'}</span>
+					{#if wrapped}
+						<span class="rounded bg-accent-soft px-1.5 py-0.5 text-accent">Base64 segment in link</span>
+					{/if}
+					{#if blockedFrom === 'plain'}
+						<span class="text-red-600">Not updated: fix the JSON on the right first.</span>
+					{/if}
+					<span class="ml-auto"><CopyButton text={encoded} label={wrapped ? 'Copy URL' : 'Copy'} /></span>
+				</div>
+				{#if error && blockedFrom === 'encoded'}
+					<div class="border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">✕ {error}</div>
+				{/if}
+				<textarea
+					bind:value={encoded}
+					oninput={syncFromEncoded}
+					spellcheck="false"
+					aria-label={wrapped ? 'URL with Base64' : 'Base64'}
+					class="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-sm leading-relaxed outline-none break-all"
+					readonly={blockedFrom === 'plain'}
+				></textarea>
+			{/snippet}
+			{#snippet second()}
+				<div class="flex shrink-0 items-center gap-2 border-b border-line bg-slate-50 px-3 py-1.5 text-xs">
+					<span class="font-medium text-mute">{isJson ? 'JSON' : 'Plain'}</span>
+					{#if isJson}
+						<span class="rounded bg-accent-soft px-1.5 py-0.5 text-accent">prettified · Base64 stays minified</span>
+					{/if}
 					{#if binary}
 						<span class="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800"
 							>Binary · {bytes.length.toLocaleString()} bytes</span
 						>
 					{/if}
 					{#if blockedFrom === 'encoded'}
-						<span class="text-red-600">Not updated: fix the Base64 errors first.</span>
+						<span class="text-red-600">Not updated: fix the Base64 on the left first.</span>
 					{/if}
+					<span class="ml-auto"><CopyButton text={plain} /></span>
 				</div>
+				{#if error && blockedFrom === 'plain'}
+					<div class="border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">✕ {error}</div>
+				{/if}
 				{#if binary}
 					<div class="flex flex-1 flex-col items-start justify-center gap-3 px-4 py-6 text-sm text-mute">
 						<p>
@@ -270,34 +327,8 @@
 						</button>
 					</div>
 				{:else}
-					<textarea
-						bind:value={plain}
-						oninput={syncFromPlain}
-						spellcheck="false"
-						aria-label="Plain text"
-						class="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-sm leading-relaxed outline-none"
-						readonly={blockedFrom === 'encoded'}
-					></textarea>
+					<PlainEditor bind:value={plain} json={isJson} readonly={blockedFrom === 'encoded'} oninput={syncFromPlain} />
 				{/if}
-			{/snippet}
-			{#snippet second()}
-				<div class="flex shrink-0 items-center gap-2 border-b border-line bg-slate-50 px-3 py-1.5 text-xs">
-					<span class="font-medium text-mute">{wrapped ? 'URL' : 'Base64'}</span>
-					{#if wrapped}
-						<span class="rounded bg-accent-soft px-1.5 py-0.5 text-accent">Base64 segment in link</span>
-					{/if}
-					<span class="ml-auto"><CopyButton text={encoded} /></span>
-				</div>
-				{#if error}
-					<div class="border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">✕ {error}</div>
-				{/if}
-				<textarea
-					bind:value={encoded}
-					oninput={syncFromEncoded}
-					spellcheck="false"
-					aria-label={wrapped ? 'URL with Base64' : 'Base64'}
-					class="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-sm leading-relaxed outline-none break-all"
-				></textarea>
 			{/snippet}
 		</SplitPane>
 	</div>

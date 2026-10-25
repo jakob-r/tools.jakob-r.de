@@ -1,6 +1,10 @@
 <script lang="ts" module>
 	export type View = { cx: number; cy: number; scale: number };
 	export type XY = { x: number; y: number };
+
+	/** Shared by both panes so each tile is requested once. */
+	const tileCache = new Map<string, HTMLImageElement>();
+	let tilesLoaded = $state(0);
 </script>
 
 <script lang="ts">
@@ -15,6 +19,8 @@
 		out,
 		pauses,
 		crop,
+		world,
+		tiles,
 		view = $bindable(),
 		hover = $bindable()
 	}: {
@@ -26,6 +32,10 @@
 		pauses: Pause[];
 		/** First cropped original index (points.length when nothing is cropped). */
 		crop: number;
+		/** Projected width of the whole Mercator world, to line up map tiles. */
+		world: number;
+		/** Draw OpenStreetMap tiles underneath. Only true after the user opted in. */
+		tiles: boolean;
 		view: View | null;
 		hover: number | null;
 	} = $props();
@@ -79,7 +89,8 @@
 		const ctx = canvas.getContext('2d')!;
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		ctx.clearRect(0, 0, width, height);
-		const unit = drawGrid(ctx, v);
+		if (tiles) drawTiles(ctx, v);
+		const unit = drawGrid(ctx, v, !tiles);
 		ctx.lineJoin = ctx.lineCap = 'round';
 
 		if (variant === 'original') {
@@ -155,11 +166,47 @@
 		ctx.stroke();
 	}
 
+	function tile(z: number, x: number, y: number) {
+		const key = `${z}/${x}/${y}`;
+		let img = tileCache.get(key);
+		if (!img) {
+			img = new Image();
+			img.src = `https://tile.openstreetmap.org/${key}.png`;
+			img.onload = () => tilesLoaded++;
+			tileCache.set(key, img);
+		}
+		return img;
+	}
+
+	function drawTiles(ctx: CanvasRenderingContext2D, v: View) {
+		void tilesLoaded; // redraw as tiles arrive
+		const z = Math.max(0, Math.min(19, Math.round(Math.log2((world * v.scale) / 256))));
+		const n = 2 ** z;
+		const size = (world / n) * v.scale;
+		// Screen position of the world's top-left corner.
+		const ox = width / 2 + (-world / 2 - v.cx) * v.scale;
+		const oy = height / 2 - (world / 2 - v.cy) * v.scale;
+		const x0 = Math.max(0, Math.floor(-ox / size));
+		const y0 = Math.max(0, Math.floor(-oy / size));
+		const x1 = Math.min(n - 1, Math.floor((width - ox) / size));
+		const y1 = Math.min(n - 1, Math.floor((height - oy) / size));
+		for (let x = x0; x <= x1; x++)
+			for (let y = y0; y <= y1; y++) {
+				const img = tile(z, x, y);
+				if (img.complete && img.naturalWidth)
+					ctx.drawImage(img, ox + x * size, oy + y * size, size + 0.5, size + 0.5);
+			}
+		// Wash out the map a little so the tracks stay the strongest thing on screen.
+		ctx.fillStyle = 'rgba(255,255,255,0.35)';
+		ctx.fillRect(0, 0, width, height);
+	}
+
 	/** Grid lines at a round distance; returns that distance in meters for the scale bar. */
-	function drawGrid(ctx: CanvasRenderingContext2D, v: View) {
+	function drawGrid(ctx: CanvasRenderingContext2D, v: View, visible: boolean) {
 		const target = 90 / v.scale;
 		const pow = 10 ** Math.floor(Math.log10(target));
 		const unit = [1, 2, 5, 10].map((m) => m * pow).find((u) => u >= target)!;
+		if (!visible) return unit;
 		ctx.strokeStyle = colors.grid;
 		ctx.lineWidth = 1;
 		ctx.beginPath();
@@ -258,4 +305,13 @@
 		ondblclick={fit}
 		aria-label="{variant} track map"
 	></canvas>
+	{#if tiles}
+		<a
+			href="https://www.openstreetmap.org/copyright"
+			target="_blank"
+			rel="noreferrer"
+			class="absolute right-0 bottom-0 rounded-tl bg-white/80 px-1.5 py-0.5 text-[10px] text-mute hover:text-accent"
+			>© OpenStreetMap contributors</a
+		>
+	{/if}
 </div>

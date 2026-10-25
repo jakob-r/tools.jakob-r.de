@@ -1,6 +1,6 @@
 <script lang="ts">
 	import InfoHint from '#lib/core/InfoHint.svelte';
-	import { projector } from './geo';
+	import { projector, worldSize } from './geo';
 	import { exportGpx, parseGpx, type ParsedGpx } from './gpx';
 	import {
 		analyze,
@@ -28,6 +28,24 @@
 	let hover = $state<number | null>(null);
 	let maps = $state<TrackMap[]>([]);
 
+	// Map tiles come from openstreetmap.org and reveal the track's area, so they are opt-in.
+	const TILES_KEY = 'gpx-cleaner.osm-tiles';
+	let tiles = $state(readTiles());
+	function readTiles() {
+		try {
+			return localStorage.getItem(TILES_KEY) === '1';
+		} catch {
+			return false;
+		}
+	}
+	$effect(() => {
+		try {
+			localStorage.setItem(TILES_KEY, tiles ? '1' : '0');
+		} catch {
+			// Private mode: the choice just isn't remembered.
+		}
+	});
+
 	const points = $derived(src?.points ?? []);
 	const analysis = $derived(analyze(points));
 	const detection = $derived(detectProfile(points, analysis, stages.crop ? crop : points.length));
@@ -37,6 +55,7 @@
 	const after = $derived(result && stats(result.out));
 
 	const project = $derived(projector(points[0]?.lat ?? 0));
+	const world = $derived(worldSize(points[0]?.lat ?? 0));
 	const xy = $derived(points.map(project));
 	const xs = $derived(
 		analysis.hasTime ? points.map((p) => (p.time! - points[0].time!) / 1000) : analysis.cum
@@ -124,10 +143,10 @@
 />
 
 <div class="relative flex h-full flex-col">
-	<div class="flex shrink-0 items-center gap-3 border-b border-line bg-white px-4 py-2 text-sm">
+	<div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-white px-4 py-2 text-sm">
 		<h1 class="font-semibold whitespace-nowrap">GPX Cleaner</h1>
 		<InfoHint
-			text="Removes GPS spikes, pause drift and the drive home from a GPX track, then simplifies it. Drop a .gpx file anywhere. Maps are drawn locally without map tiles, so your location is never sent anywhere."
+			text="Removes GPS spikes, pause drift and the drive home from a GPX track, then simplifies it. Drop a .gpx file anywhere. Maps are drawn locally; an optional OpenStreetMap background can be switched on."
 		/>
 		<label
 			class="ml-2 cursor-pointer rounded-md border whitespace-nowrap border-line px-2.5 py-1 text-xs hover:border-accent hover:text-accent"
@@ -136,6 +155,17 @@
 			<input type="file" accept=".gpx,application/gpx+xml" class="hidden" onchange={(e) => open(e.currentTarget.files?.[0])} />
 		</label>
 		{#if fileName}<span class="max-w-48 truncate text-xs text-mute" title={fileName}>{fileName}</span>{/if}
+
+		{#if src}
+			<label class="ml-2 flex items-center gap-1.5 text-xs whitespace-nowrap">
+				<input type="checkbox" bind:checked={tiles} class="accent-accent" />
+				Map background
+				<span class="text-mute">(loads tiles from openstreetmap.org)</span>
+				<InfoHint
+					text="Off by default. When on, your browser requests map images from the OpenStreetMap Foundation's tile servers. They see your IP address and which area you are looking at, never the GPX file itself."
+				/>
+			</label>
+		{/if}
 
 		{#if before && after}
 			<dl class="ml-auto flex gap-4 text-xs">
@@ -197,6 +227,8 @@
 						out={result.out}
 						pauses={result.pauses}
 						crop={stages.crop ? crop : points.length}
+						{world}
+						{tiles}
 						bind:view
 						bind:hover
 					/>

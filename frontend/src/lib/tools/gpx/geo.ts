@@ -12,11 +12,20 @@ export function distance(a: LatLon, b: LatLon): number {
 	return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/** Equirectangular projection around a reference latitude: x/y in meters, y grows north. */
+/**
+ * Web Mercator scaled so that units are meters at the reference latitude; y grows north.
+ * Being Mercator, it lines up with standard map tiles (see `worldSize`).
+ */
 export function projector(refLat: number) {
 	const k = Math.cos(refLat * rad);
-	return (p: LatLon) => ({ x: p.lon * rad * R * k, y: p.lat * rad * R });
+	return (p: LatLon) => ({
+		x: p.lon * rad * R * k,
+		y: Math.log(Math.tan(Math.PI / 4 + (p.lat * rad) / 2)) * R * k
+	});
 }
+
+/** Projected units per full world width for a `projector(refLat)`. */
+export const worldSize = (refLat: number) => 2 * Math.PI * R * Math.cos(refLat * rad);
 
 /** Angle at b (degrees) between b→a and b→c. 180 = straight line, 0 = full reversal. */
 export function angleAt(a: LatLon, b: LatLon, c: LatLon): number {

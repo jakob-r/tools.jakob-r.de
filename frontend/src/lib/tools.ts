@@ -16,6 +16,13 @@ export const tools: Tool[] = [
 		thumbnail: '/tools/markshift.svg'
 	},
 	{
+		slug: 'base64-encoder-decoder',
+		title: 'Base64 Encoder / Decoder',
+		description: 'Encode and decode Base64. Edit either side, share via the URL hash, open decoded links.',
+		tags: ['base64', 'encode', 'decode', 'binary'],
+		thumbnail: '/tools/base64-encoder-decoder.svg'
+	},
+	{
 		slug: 'gpx-cleaner',
 		title: 'GPX Cleaner',
 		description: 'One-click cleanup for GPS tracks: removes spikes, pause drift and the drive home. Compare before and after.',

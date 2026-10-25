@@ -1,0 +1,70 @@
+# Architecture & Tech Stack
+
+General product concept lives in `IDEA.md`.
+
+This is a static, browser-only collection of small tools.
+
+## Tech Stack
+
+- **Framework**: **Svelte 5** (Runes: `$state`, `$derived`, `$effect`) with **SvelteKit** and **TypeScript**.
+  - One route per tool, so SvelteKit emits a separate JS chunk per tool. The landing page must not import those chunks.
+  - Fine-grained reactivity keeps the two panes in sync.
+- **Styling**: **Tailwind CSS v4** plus a small set of CSS custom properties for the shared accent palette.
+  - Friendly, slightly colorful, professional, and minimal.
+  - Desktop first. Split-pane tools should fill the viewport instead of sitting in a narrow column.
+- **Build & Package Manager**: **Vite** + **pnpm**.
+- **Output**: `@sveltejs/adapter-static` with prerendering. Every route is known at build time, so the production build is a set of static files.
+- **WebAssembly**: allowed when it is the right tool for the job — heavy local computation, or a library that already compiles to Wasm. Prefer ordinary TypeScript when that stays small and clear. The `.wasm` module is a same-origin asset of that tool, imported only from `frontend/src/lib/tools/<slug>/`, so the landing page never downloads it. Input stays in the browser; Wasm does not justify a server.
+
+Do not add a backend. If a tool cannot be done locally in the browser (including Wasm), stop and ask.
+
+## Modular Structure
+
+Share chrome across tools. Keep each tool extractable: its route, its module, and its thumbnail should be the only places that know it exists, plus one metadata entry.
+
+1. **Tool registry (`frontend/src/lib/tools.ts`)**
+   - Data only: `slug`, `title`, `description`, `tags`, thumbnail path.
+   - The landing page filters this list for search. It must not import anything under `frontend/src/lib/tools/<slug>/`.
+2. **Core (`frontend/src/lib/core/`)**
+   - Shared UI so tools do not invent their own controls: gallery card, search field, split pane (horizontal or vertical), copy-to-clipboard button, info-hint icon, local file open/save.
+   - Hints go behind the info icon. Do not put instructional paragraphs on the tool canvas.
+3. **One module per tool (`frontend/src/lib/tools/<slug>/`)**
+   - UI, conversion logic, and any Wasm module live here. Heavy dependencies (parsers, highlighters, `.wasm`) are imported only from this module so they stay in that route's chunk.
+   - Route: `frontend/src/routes/<slug>/+page.svelte`, which imports that module and nothing from other tools.
+   - Thumbnail: a small static SVG at `frontend/static/tools/<slug>.svg`, referenced by the registry. Not a screenshot and not a live render of the tool.
+
+Planned tools (behavior is specified in `IDEA.md`):
+
+| Slug | Route | Architectural notes |
+| --- | --- | --- |
+| `markdown` | `/markdown` | Markdown, HTML, and rich text. Local parser and highlighter only. Horizontal or vertical split. |
+| `base64` | `/base64` | Text and binary. Horizontal split only. Payload lives in the URL hash (`#...`), never the query string, so it is not sent to the host. Editing either pane updates the hash. If the decoded value is a URL, show a link that opens in a new tab. |
+| `json` | `/json` | Format, validate, minify, or pretty-print. Local file open/save and clipboard. Horizontal or vertical split. |
+| `json-diff` | `/json-diff` | Two JSON panes, beautified on load. Recursive key sort and ignore-case are local view options. Horizontal or vertical split. |
+
+## Pane Sync
+
+Tools with two panes treat either side as editable.
+
+- A change on one side recomputes the other.
+- Guard the update so the write-back does not loop.
+- Invalid input stays visible in the pane that has it. The other pane shows the error and does not present a successful conversion.
+- Syntax highlighting is local and light, and it marks errors inline. Do not load a highlighter from a CDN.
+
+Clipboard and files use browser APIs only (`navigator.clipboard`, `<input type="file">`, download, or the File System Access API). Nothing is uploaded.
+
+## Coding Conventions
+
+- Keep the root `Makefile` up to date. `make dev` installs if needed and starts the Vite dev server. `make check` runs `svelte-check`. `make build` runs the production build.
+- Desktop layout by default. A tool is mobile-friendly only when `IDEA.md` says so.
+- Prefer small dependencies. A tool that can use the platform (Base64, `JSON.parse`, clipboard, files) should not take on a library or a Wasm module for that. Use Wasm when the local work is heavy enough, or when the useful implementation is already Wasm.
+- Shared controls come from `frontend/src/lib/core/`. A one-off control stays inside the tool module.
+- The landing page states that data never leaves the browser.
+
+## Production
+
+One image: Node builds the SvelteKit static site, nginx serves the `build/` output.
+
+On the VPS the container sits next to an existing [nginx-proxy](https://github.com/nginx-proxy/nginx-proxy) with acme-companion. It joins the proxy Docker network and sets `VIRTUAL_HOST`, `VIRTUAL_PORT`, `LETSENCRYPT_HOST`, and `LETSENCRYPT_EMAIL`. Leave the proxy's Compose file alone and don't edit nginx by hand. DNS for `VIRTUAL_HOST` must already point at the VPS.
+
+`docker compose up -d --build` (and `make docker-up`) builds and starts that static site. Redeploy with `git pull` and the same command.

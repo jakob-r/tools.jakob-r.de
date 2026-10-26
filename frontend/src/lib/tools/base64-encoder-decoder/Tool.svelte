@@ -7,12 +7,13 @@
 		asOpenableUrl,
 		decodeBase64,
 		encodeBytes,
+		encodeBytesWithStyle,
 		encodeText,
-		encodeTextWithStyle,
 		findEmbeddedBase64,
 		normalizeBase64,
 		type Base64Style
 	} from './convert';
+	import { codecLabels, compress, detectPayload, type Codec } from './compress';
 	import { canonicalFromPlain, viewForDecodedText } from './json';
 	import PlainEditor from './PlainEditor.svelte';
 
@@ -23,6 +24,8 @@
 	let plain = $state(samplePlain);
 	let encoded = $state(sampleB64);
 	let isJson = $state(false);
+	/** Compression between the Base64 bytes and the text (auto-detected on decode). */
+	let codec = $state<Codec>('none');
 	/** Surroundings of an embedded Base64 segment (e.g. URL path before/after the payload). */
 	let prefix = $state('');
 	let suffix = $state('');
@@ -74,14 +77,16 @@
 		}
 		error = null;
 		blockedFrom = null;
-		if (result.text !== null) {
-			setPlainFromDecodedText(result.text);
+		const payload = detectPayload(result.bytes);
+		codec = payload.codec;
+		if (payload.text !== null) {
+			setPlainFromDecodedText(payload.text);
 			binary = false;
 			if (fileName === 'decoded.bin') fileName = 'decoded.txt';
 		} else {
 			plain = '';
 			isJson = false;
-			bytes = result.bytes;
+			bytes = payload.bytes;
 			binary = true;
 			if (fileName === 'decoded.txt') fileName = 'decoded.bin';
 		}
@@ -134,7 +139,8 @@
 		const text = canon.ok ? canon.text : plain;
 		isJson = canon.ok ? canon.isJson : false;
 		bytes = new TextEncoder().encode(text);
-		const b64 = wrapped ? encodeTextWithStyle(text, b64Style) : encodeText(text);
+		const packed = compress(bytes, codec);
+		const b64 = wrapped ? encodeBytesWithStyle(packed, b64Style) : encodeBytes(packed);
 		if (!wrapped) b64Style = defaultStyle;
 		encoded = composeEncoded(b64);
 		fileName = 'decoded.txt';
@@ -197,17 +203,24 @@
 		error = null;
 		blockedFrom = null;
 		encoded = encodeBytes(buf);
-		const result = decodeBase64(encoded);
-		if (result.ok && result.text !== null) {
-			setPlainFromDecodedText(result.text);
+		const payload = detectPayload(buf);
+		codec = payload.codec;
+		if (payload.text !== null) {
+			setPlainFromDecodedText(payload.text);
 			binary = false;
 		} else {
 			plain = '';
 			isJson = false;
-			bytes = buf;
+			bytes = payload.bytes;
 			binary = true;
 		}
 		writeHash(encoded);
+	}
+
+	/** Changing the codec re-encodes the Base64 side from the text. */
+	function setCodec(next: Codec) {
+		codec = next;
+		syncFromPlain();
 	}
 
 	function downloadDecoded() {
@@ -229,7 +242,7 @@
 	<div class="flex shrink-0 items-center gap-2 border-b border-line bg-white px-4 py-2 text-sm">
 		<h1 class="font-semibold">Base64 Encoder / Decoder</h1>
 		<InfoHint
-			text="Base64 (or a link with an embedded Base64 segment) on the left, decoded text on the right. JSON is shown pretty-printed with light highlighting; the Base64 side stays minified. Paste a link that embeds Base64 (path, query, hash, or data URL) and only that segment is rewritten when you edit."
+			text="Base64 (or a link with an embedded Base64 segment) on the left, decoded text on the right. JSON is shown pretty-printed with light highlighting; the Base64 side stays minified. Paste a link that embeds Base64 (path, query, hash, or data URL) and only that segment is rewritten when you edit. Compressed payloads (gzip, zlib, raw deflate as written by pako) are detected and inflated when that yields more plausible text; the Compression menu overrides it and re-encodes."
 		/>
 		{#if openUrl}
 			<a
@@ -307,7 +320,22 @@
 					{#if blockedFrom === 'encoded'}
 						<span class="text-red-600">Not updated: fix the Base64 on the left first.</span>
 					{/if}
-					<span class="ml-auto"><CopyButton text={plain} /></span>
+					<label class="ml-auto flex items-center gap-1.5 text-mute">
+						Compression
+						<select
+							value={codec}
+							onchange={(e) => setCodec(e.currentTarget.value as Codec)}
+							disabled={binary || blockedFrom !== null}
+							class="rounded border px-1 py-0.5 text-xs {codec === 'none'
+								? 'border-line bg-white text-ink'
+								: 'border-accent bg-accent-soft text-accent'}"
+						>
+							{#each Object.entries(codecLabels) as [value, label] (value)}
+								<option {value}>{label}</option>
+							{/each}
+						</select>
+					</label>
+					<CopyButton text={plain} />
 				</div>
 				{#if error && blockedFrom === 'plain'}
 					<div class="border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">✕ {error}</div>

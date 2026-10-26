@@ -42,6 +42,7 @@ Design:
 - The data will always stay in sync between the two panes, no matter where I modify it.
 - Copy to clipboard button for the output.
 - If it's a URL with base64 encoded data, also always show a link that opens in a new tab.
+- Base64 of compressed text (e.g. JSON → pako deflate → Base64) is detected and decompressed when that looks more plausible than the raw bytes; editing re-compresses with the same method.
 
 ### JSON Formatter, Validator
 

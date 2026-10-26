@@ -1,4 +1,5 @@
 /** UTF-8 text ↔ Base64, plus helpers for URLs that embed a Base64 segment. */
+import { detectPayload } from './compress';
 
 export type DecodeOk = {
 	ok: true;
@@ -131,9 +132,15 @@ function isEmbeddedCandidate(s: string): boolean {
 	const compact = s.replace(/\s+/g, '');
 	if (compact.length < MIN_EMBEDDED_LEN) return false;
 	if (!looksLikeBase64(compact)) return false;
-	// Prefer payloads that decode to text — path ids that happen to be valid Base64 are rare at this length.
+	// Prefer payloads that decode (possibly after decompression) to text — path ids that
+	// happen to be valid Base64 are rare at this length.
 	const decoded = decodeBase64(compact);
-	return decoded.ok && decoded.text !== null;
+	return decoded.ok && detectPayload(decoded.bytes).text !== null;
+}
+
+/** The value itself plus its `.`-separated parts, for versioned payloads like `z1.<base64>`. */
+function candidateParts(value: string): string[] {
+	return value.includes('.') ? [value, ...value.split('.')] : [value];
 }
 
 function wrapAt(input: string, base64: string): EmbeddedBase64 | null {
@@ -164,10 +171,12 @@ export function findEmbeddedBase64(input: string): EmbeddedBase64 | null {
 
 	let best: EmbeddedBase64 | null = null;
 	const consider = (value: string) => {
-		if (!isEmbeddedCandidate(value)) return;
-		const found = wrapAt(trimmed, value);
-		if (!found) return;
-		if (!best || found.base64.length > best.base64.length) best = found;
+		for (const part of candidateParts(value)) {
+			if (!isEmbeddedCandidate(part)) continue;
+			const found = wrapAt(trimmed, part);
+			if (!found) continue;
+			if (!best || found.base64.length > best.base64.length) best = found;
+		}
 	};
 
 	try {
@@ -195,6 +204,9 @@ export function findEmbeddedBase64(input: string): EmbeddedBase64 | null {
 		// Not a URL — fall through to bare Base64.
 	}
 
+	if (best) return best;
+
+	if (!/\s/.test(trimmed) && trimmed.includes('.')) consider(trimmed);
 	if (best) return best;
 
 	if (looksLikeBase64(trimmed)) {

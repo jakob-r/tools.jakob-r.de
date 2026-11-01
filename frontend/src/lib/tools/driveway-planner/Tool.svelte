@@ -9,6 +9,7 @@
 	import PlanCanvas, { type Mode, type Playback } from './PlanCanvas.svelte';
 	import type { PlanInput, PlanResult } from './planner';
 	import type { LayerScene, MarkerKind, Scene } from './render';
+	import { exampleSvg, examples, type Example } from './examples';
 	import { decodeState, encodeState, type SharedState } from './share';
 	import { drive, fitDrivable, joinSplines, type Spline } from './spline';
 	import { multiArea, sweepPieces, unionOf } from './sweep';
@@ -193,6 +194,32 @@
 	const initial = decodeState(location.hash);
 	if (initial) applyShared(initial);
 
+	async function loadExample(ex: Example) {
+		const svg = exampleSvg(ex);
+		const img = await importPlan(new File([svg], `${ex.id}.svg`, { type: 'image/svg+xml' }));
+		plan = img;
+		applyShared({
+			plan: { name: img.name, width: img.width, height: img.height },
+			mpp: ex.width / img.width,
+			dpi: 96,
+			buffer: ex.buffer,
+			area: ex.area,
+			areaClosed: true,
+			active: 0,
+			layers: ex.routes.map((r, i) => ({
+				name: r.name,
+				color: palette[i % palette.length],
+				visible: true,
+				union: true,
+				car: { ...presets[0] },
+				start: r.start,
+				via: null,
+				end: r.end,
+				spline: null
+			}))
+		});
+	}
+
 	/** Change the scale and keep everything drawn on the plan in place. */
 	function setMpp(next: number) {
 		if (!(next > 0) || !Number.isFinite(next)) return;
@@ -332,11 +359,10 @@
 		l.spline = splines.reduce((a, b) => joinSplines(a, b));
 	}
 
-	// Find a path as soon as both ends are placed.
+	// Find a path as soon as both ends are placed (for every route, e.g. after loading an example).
 	$effect(() => {
-		const l = active;
-		if (l && l.start && l.end && !l.spline && !l.planning && !l.error && !dragging && mode === 'select')
-			findPath(l);
+		if (dragging || mode !== 'select') return;
+		for (const l of layers) if (l.start && l.end && !l.spline && !l.planning && !l.error) findPath(l);
 	});
 
 	// --- Layers ----------------------------------------------------------------------------
@@ -447,6 +473,29 @@
 		open(e.dataTransfer?.files[0]);
 	}}
 />
+
+{#snippet card(onclick: () => void, image: string | null, title: string, description: string)}
+	<button
+		type="button"
+		{onclick}
+		class="flex flex-col overflow-hidden rounded-2xl border-2 border-slate-200 bg-white text-left hover:border-accent"
+	>
+		<span class="flex h-36 shrink-0 overflow-hidden border-b border-line bg-slate-50 p-2">
+			{#if image}
+				<img src={image} alt="" class="min-h-0 w-full object-contain" />
+			{:else}
+				<span
+					class="size-full rounded-md border border-line bg-white"
+					style="background-image: linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px); background-size: 12px 12px"
+				></span>
+			{/if}
+		</span>
+		<span class="flex flex-col gap-1 p-3">
+			<span class="text-sm font-medium">{title}</span>
+			<span class="text-xs text-mute">{description}</span>
+		</span>
+	</button>
+{/snippet}
 
 {#snippet openButton(label: string)}
 	<label
@@ -831,9 +880,9 @@
 			</div>
 		</div>
 	{:else}
-		<div class="grid flex-1 place-items-center p-6">
+		<div class="mx-auto flex w-full max-w-4xl flex-col gap-4 p-6">
 			<label
-				class="flex w-full max-w-lg cursor-pointer flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-white px-8 py-14 text-center hover:border-accent"
+				class="flex cursor-pointer flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-white px-8 py-12 text-center hover:border-accent"
 			>
 				<span class="text-4xl">🏡</span>
 				<span class="font-medium">Drop a property plan here or click to open one</span>
@@ -845,9 +894,23 @@
 					onchange={(e) => open(e.currentTarget.files?.[0])}
 				/>
 			</label>
-			<button type="button" onclick={() => (started = true)} class="-mt-24 text-sm text-accent underline"
-				>or start on an empty grid</button
-			>
+			<h2 class="mt-2 text-sm text-mute">Or start from an example</h2>
+			<div class="grid grid-cols-4 gap-4">
+				{#each examples as ex}
+					{@render card(
+						() => loadExample(ex),
+						`data:image/svg+xml,${encodeURIComponent(exampleSvg(ex, true))}`,
+						ex.title,
+						ex.description
+					)}
+				{/each}
+				{@render card(
+					() => (started = true),
+					null,
+					'Empty grid',
+					'No plan at hand: sketch the area and routes on a 1 m grid.'
+				)}
+			</div>
 		</div>
 	{/if}
 

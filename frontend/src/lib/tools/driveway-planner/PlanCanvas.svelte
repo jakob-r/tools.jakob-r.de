@@ -28,8 +28,7 @@
 		playback: Playback | null;
 		dragging?: boolean;
 		onarea: (pts: Vec[], closed: boolean) => void;
-		/** `placing` is true while a marker is being put down in its own mode, false when it is dragged. */
-		onmarker: (which: MarkerKind, pose: Pose, placing: boolean) => void;
+		onmarker: (which: MarkerKind, pose: Pose) => void;
 		onspline: (s: Spline) => void;
 	} = $props();
 
@@ -125,7 +124,7 @@
 			drag = { kind: 'ruler' };
 		} else if (mode === 'start' || mode === 'via' || mode === 'end') {
 			// NaN: no direction yet, the tool picks a sensible one unless the user drags.
-			onmarker(mode, { x: w.x, y: w.y, th: markerOf(mode)?.th ?? NaN }, true);
+			onmarker(mode, { x: w.x, y: w.y, th: markerOf(mode)?.th ?? NaN });
 			drag = { kind: 'place', which: mode, at: w };
 		} else {
 			const h = hit(w);
@@ -150,12 +149,12 @@
 			case 'marker': {
 				const m = markerOf(drag.which);
 				if (!m) break;
-				onmarker(drag.which, drag.turn ? { ...m, th: Math.atan2(w.y - m.y, w.x - m.x) } : { ...m, x: w.x, y: w.y }, false);
+				onmarker(drag.which, drag.turn ? { ...m, th: Math.atan2(w.y - m.y, w.x - m.x) } : { ...m, x: w.x, y: w.y });
 				break;
 			}
 			case 'place':
 				if (dist(w, drag.at) > HIT / view.s)
-					onmarker(drag.which, { ...drag.at, th: Math.atan2(w.y - drag.at.y, w.x - drag.at.x) }, true);
+					onmarker(drag.which, { ...drag.at, th: Math.atan2(w.y - drag.at.y, w.x - drag.at.x) });
 				break;
 			case 'spline': {
 				const s = active?.spline;

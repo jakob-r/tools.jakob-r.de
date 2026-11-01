@@ -14,6 +14,13 @@ export type PlanInput = {
 	goal: Pose;
 	/** How the two ends are called in messages. */
 	names?: [string, string];
+	/**
+	 * Accept any pose this close to the goal (meters, radians) instead of only the exact one,
+	 * so a via point is driven through instead of stopped at.
+	 */
+	tolerance?: { pos: number; th: number };
+	/** Gear the car is already moving in at the start (+1/-1); changing it then costs a gear change. */
+	startGear?: number;
 };
 export type PlanResult = { ok: true; poses: Pose[]; gears: number[]; expanded: number } | { ok: false; error: string };
 
@@ -72,7 +79,7 @@ class Heap {
 	}
 }
 
-export function plan({ car, buffer, area, start, goal, names = ['start', 'end'] }: PlanInput): PlanResult {
+export function plan({ car, buffer, area, start, goal, names = ['start', 'end'], tolerance, startGear = 0 }: PlanInput): PlanResult {
 	const bounded = area.length >= 3;
 	// A little slack in steering and clearance, so the editable spline fitted to the result
 	// (which only approximates it) still passes the same checks.
@@ -183,7 +190,7 @@ export function plan({ car, buffer, area, start, goal, names = ['start', 'end'] 
 		return null;
 	}
 
-	add(start, 0, -1, 0, 0);
+	add(start, 0, -1, startGear, 0);
 	let expanded = 0;
 	const deadline = Date.now() + 15_000;
 	while (open.size) {
@@ -192,9 +199,16 @@ export function plan({ car, buffer, area, start, goal, names = ['start', 'end'] 
 		const kk = key(p, cellOf(p));
 		if ((best.get(kk) ?? Infinity) < G[id]) continue;
 		if (++expanded > MAX_EXPANSIONS || Date.now() > deadline) break;
+		if (tolerance && id > 0 && Math.abs(wrap(p.th - goal.th)) < tolerance.th) {
+			// Measured at the front axle, like the via marker.
+			const L = car.wheelbase;
+			const dx = p.x - goal.x + L * (Math.cos(p.th) - Math.cos(goal.th));
+			const dy = p.y - goal.y + L * (Math.sin(p.th) - Math.sin(goal.th));
+			if (Math.hypot(dx, dy) < tolerance.pos) return { ok: true, expanded, ...reconstruct(id, []) };
+		}
 
 		const rs = rsDistance(p, goal, R);
-		if (rs < 6 * R || expanded % 8 === 0) {
+		if (!tolerance && (rs < 6 * R || expanded % 8 === 0)) {
 			const finish = shoot(id);
 			if (finish) return { ok: true, expanded, ...reconstruct(id, finish) };
 		}

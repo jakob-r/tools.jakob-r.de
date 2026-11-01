@@ -26,6 +26,9 @@ export type Drive = {
 
 const EVAL_STEP = 0.03;
 
+/** How closely a route has to pass its via point (front axle; meters, radians). */
+export const VIA_TOLERANCE = { pos: 0.4, th: (20 * Math.PI) / 180 };
+
 /**
  * Editable spline for a planned path (rear-axle poses with gears). Starts with few points and
  * only adds more where needed, until driving the spline passes the same checks as the plan.
@@ -139,7 +142,15 @@ function catmullRom(p0: Vec, p1: Vec, p2: Vec, p3: Vec, u: number): Vec {
  * Drive the spline: integrate the rear axle from the start heading and check steering, the area
  * and the final heading.
  */
-export function drive(car: Car, buffer: number, area: Vec[], s: Spline, startTh: number, endTh: number): Drive {
+export function drive(
+	car: Car,
+	buffer: number,
+	area: Vec[],
+	s: Spline,
+	startTh: number,
+	endTh: number,
+	via: Pose | null = null
+): Drive {
 	const samples = evaluate(s);
 	const L = car.wheelbase;
 	// 2° of slack: the spline only approximates arcs, and turning-circle figures are rounded.
@@ -188,6 +199,15 @@ export function drive(car: Car, buffer: number, area: Vec[], s: Spline, startTh:
 	if (outside) problems.push('The car leaves the area');
 	const off = Math.abs(wrap(th - endTh)) * (180 / Math.PI);
 	if (off > 5) problems.push(`Ends ${Math.round(off)}° off the end direction`);
+	// A little more slack than the planner gets, for the spline fitted to its result.
+	if (
+		via &&
+		!front.some(
+			(f, i) =>
+				dist(f, via) < VIA_TOLERANCE.pos * 1.5 && Math.abs(wrap(poses[i].th - via.th)) < VIA_TOLERANCE.th * 1.5
+		)
+	)
+		problems.push('Does not pass the via point in its direction');
 	return { poses, front, gears, steer, bad, problems };
 }
 

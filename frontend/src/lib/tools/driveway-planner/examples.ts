@@ -112,7 +112,7 @@ export const examples: Example[] = [
 	{
 		id: 'turning-in-the-yard',
 		title: 'Turning in the yard',
-		description: 'In forwards through the gate (a via point just behind it), then a K-turn to park facing the exit.',
+		description: 'In forwards through the gate (a via point), then a K-turn to park facing the exit.',
 		width: 24,
 		height: 26,
 		buffer: 0.25,
@@ -134,7 +134,7 @@ export const examples: Example[] = [
 			{
 				name: 'Park facing out',
 				start: { x: 6, y: 23.5, th: EAST },
-				via: { x: 11.8, y: 14.5, th: UP },
+				via: { x: 11.8, y: 17.5, th: UP },
 				end: { x: 14.8, y: 11, th: DOWN }
 			}
 		],

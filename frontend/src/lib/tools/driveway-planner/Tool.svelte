@@ -11,7 +11,7 @@
 	import type { LayerScene, MarkerKind, Scene } from './render';
 	import { exampleSvg, examples, type Example } from './examples';
 	import { decodeState, encodeState, parseProject, projectJson, type SharedState } from './share';
-	import { drive, fitDrivable, joinSplines, type Spline } from './spline';
+	import { drive, fitDrivable, joinSplines, VIA_TOLERANCE, type Spline } from './spline';
 	import { multiArea, sweepPieces, unionOf } from './sweep';
 
 	type Layer = {
@@ -75,7 +75,7 @@
 	const drives = $derived(
 		layers.map((l) =>
 			l.spline && l.start && l.end
-				? drive(l.car, buffer, areaClosed ? area : [], l.spline, l.start.th, l.end.th)
+				? drive(l.car, buffer, areaClosed ? area : [], l.spline, l.start.th, l.end.th, l.via)
 				: null
 		)
 	);
@@ -284,7 +284,7 @@
 		for (const l of layers) l.error = '';
 	}
 
-	function setMarker(which: MarkerKind, pose: Pose, placing: boolean) {
+	function setMarker(which: MarkerKind, pose: Pose) {
 		const l = active;
 		if (!l) return;
 		if (Number.isNaN(pose.th)) {
@@ -292,26 +292,17 @@
 			const { start, end } = l;
 			pose = { ...pose, th: which === 'via' && start && end ? Math.atan2(end.y - start.y, end.x - start.x) : 0 };
 		}
-		const old = l[which];
 		l[which] = pose;
 		l.error = '';
 		if (!l.spline) return;
-		// Putting down a new via point asks for a new route through it.
-		if (which === 'via' && placing) {
+		// The route only passes near its via point, so a moved via point means a new route
+		// (found once the drag ends).
+		if (which === 'via') {
 			l.spline = null;
 			return;
 		}
 		const pts = [...l.spline.pts];
-		const i =
-			which === 'start'
-				? 0
-				: which === 'end'
-					? pts.length - 1
-					: old
-						? pts.findIndex((p) => dist(p, old) < 1e-6)
-						: -1;
-		if (i < 0) return;
-		pts[i] = { x: pose.x, y: pose.y };
+		pts[which === 'start' ? 0 : pts.length - 1] = { x: pose.x, y: pose.y };
 		l.spline = { ...l.spline, pts };
 	}
 
@@ -358,34 +349,43 @@
 		const car = $state.snapshot(l.car);
 		const stops = [l.start, l.via, l.end].filter((m) => m !== null).map((m) => ({ ...m }));
 		const zone = areaClosed ? $state.snapshot(area) : [];
-		// With a via point the route is planned in two legs that meet there.
-		const legs = await Promise.all(
-			stops.slice(1).map((to, i) =>
-				runPlan({
-					car,
-					buffer,
-					area: zone,
-					start: rearFromFront(car, stops[i]),
-					goal: rearFromFront(car, to),
-					names: [i ? 'via point' : 'start', to === stops[stops.length - 1] ? 'end' : 'via point']
-				})
-			)
-		);
+		// With a via point the route is planned in two legs. The first only has to pass the via
+		// point; the second carries on from wherever that was, in the same gear if it can.
+		const legs: { poses: Pose[]; gears: number[] }[] = [];
+		let from = rearFromFront(car, stops[0]);
+		let gear = 0;
+		let error = '';
+		for (let i = 1; i < stops.length; i++) {
+			const last = i === stops.length - 1;
+			const result = await runPlan({
+				car,
+				buffer,
+				area: zone,
+				start: from,
+				goal: rearFromFront(car, stops[i]),
+				names: [i > 1 ? 'via point' : 'start', last ? 'end' : 'via point'],
+				tolerance: last ? undefined : VIA_TOLERANCE,
+				startGear: gear
+			});
+			if ('error' in result) {
+				error = (stops.length > 2 ? (last ? 'From the via point: ' : 'To the via point: ') : '') + result.error;
+				break;
+			}
+			legs.push(result);
+			from = result.poses[result.poses.length - 1];
+			gear = result.gears[result.gears.length - 1];
+		}
 		l.planning = false;
 		// Markers moved while planning: that result is for a different question.
 		const now = [l.start, l.via, l.end].filter((m) => m !== null);
 		if (now.length !== stops.length || now.some((m, i) => m.x !== stops[i].x || m.y !== stops[i].y)) return;
-		const failed = legs.findIndex((r) => 'error' in r);
-		if (failed >= 0) {
-			const r = legs[failed];
-			const prefix = legs.length > 1 ? (failed ? 'From the via point: ' : 'To the via point: ') : '';
-			l.error = prefix + ('error' in r ? r.error : '');
+		if (error) {
+			l.error = error;
 			return;
 		}
-		const splines = legs.map((r, i) =>
-			'error' in r ? null! : fitDrivable(car, buffer, zone, r.poses, r.gears, stops[i + 1].th)
-		);
-		l.spline = splines.reduce((a, b) => joinSplines(a, b));
+		l.spline = legs
+			.map((r) => fitDrivable(car, buffer, zone, r.poses, r.gears, r.poses[r.poses.length - 1].th))
+			.reduce((a, b) => joinSplines(a, b));
 	}
 
 	// Find a path as soon as both ends are placed (for every route, e.g. after loading an example).
@@ -480,7 +480,7 @@
 		{
 			id: 'via',
 			label: 'Via',
-			hint: 'Optional: click a position the route has to pass, to guide the planner. Drag to set the direction the car points there.'
+			hint: 'Optional: click a position the route has to drive through, to guide the planner. Drag to set the direction. The car passes within 40 cm and 20° of it without stopping; moving it finds a new route.'
 		},
 		{ id: 'end', label: 'End', hint: 'Click where the middle of the front axle ends, drag in the direction the car points.' }
 	];

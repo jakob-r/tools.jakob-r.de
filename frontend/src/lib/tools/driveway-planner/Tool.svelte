@@ -802,7 +802,9 @@
 							<div class="flex items-center gap-1.5">
 								<span class="size-2.5 shrink-0 rounded-full" style="background: {l.color}"></span>
 								<input
-									bind:value={l.name}
+									value={l.name}
+									onchange={(e) => (l.name = e.currentTarget.value)}
+									onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
 									class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 font-medium hover:border-line focus:border-accent focus:bg-white"
 								/>
 								<label class="flex items-center gap-1 text-mute" title="Part of the driveway">

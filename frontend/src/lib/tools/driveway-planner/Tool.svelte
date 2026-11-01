@@ -100,7 +100,7 @@
 	// The exact union is slower than drawing the pieces, so it waits until editing pauses.
 	let pathway = $state.raw<MultiPolygon | null>(null);
 	$effect(() => {
-		const pieces = layerScenes.filter((l) => l.visible && l.union).flatMap((l) => l.pieces);
+		const pieces = layerScenes.filter((l) => l.union).flatMap((l) => l.pieces);
 		pathway = null;
 		if (dragging || !pieces.length) return;
 		const t = setTimeout(() => (pathway = unionOf(pieces)), 120);

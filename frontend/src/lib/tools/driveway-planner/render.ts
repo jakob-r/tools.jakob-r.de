@@ -73,7 +73,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, scene: Scene, px: numbe
 	const visible = scene.layers.filter((l) => l.visible);
 	for (const l of visible) if (!l.union) fillPieces(l.pieces, l.color + '22');
 	fillPieces(
-		visible.filter((l) => l.union).flatMap((l) => l.pieces),
+		scene.layers.filter((l) => l.union).flatMap((l) => l.pieces),
 		colors.pathway
 	);
 	if (scene.pathway) {

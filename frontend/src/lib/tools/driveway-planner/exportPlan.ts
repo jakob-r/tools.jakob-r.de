@@ -55,6 +55,7 @@ export function exportSvg(scene: Scene, name: string) {
 		}
 		for (const [m, c] of [
 			[l.start, colors.start],
+			[l.via, colors.via],
 			[l.end, colors.end]
 		] as const)
 			if (m) out.push(`<path d="${d(footprint(l.car, 0, rearFromFront(l.car, m)))}" stroke="${c}" stroke-width="0.04"/>`);

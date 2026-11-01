@@ -6,6 +6,8 @@ import type { Pose, Vec } from './geometry';
 import type { PlanImage } from './importPlan';
 import type { Drive, Spline } from './spline';
 
+export type MarkerKind = 'start' | 'via' | 'end';
+
 export type LayerScene = {
 	id: string;
 	name: string;
@@ -15,6 +17,8 @@ export type LayerScene = {
 	car: Car;
 	/** Front-axle poses. */
 	start: Pose | null;
+	/** Optional position the route has to pass. */
+	via: Pose | null;
 	end: Pose | null;
 	spline: Spline | null;
 	drive: Drive | null;
@@ -37,6 +41,7 @@ export const colors = {
 	pathwayLine: '#334155',
 	bad: '#dc2626',
 	start: '#16a34a',
+	via: '#ca8a04',
 	end: '#1e293b'
 };
 
@@ -103,6 +108,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, scene: Scene, px: numbe
 			ctx.stroke();
 		}
 		if (l.start) marker(ctx, l.car, l.start, colors.start, px);
+		if (l.via) marker(ctx, l.car, l.via, colors.via, px);
 		if (l.end) marker(ctx, l.car, l.end, colors.end, px);
 	}
 }
@@ -196,7 +202,7 @@ export function sceneBounds(scene: Scene) {
 	scene.area.forEach(add);
 	for (const l of scene.layers) {
 		for (const piece of l.pieces) piece.forEach(add);
-		for (const m of [l.start, l.end]) if (m) footprint(l.car, 0, rearFromFront(l.car, m)).forEach(add);
+		for (const m of [l.start, l.via, l.end]) if (m) footprint(l.car, 0, rearFromFront(l.car, m)).forEach(add);
 	}
 	return Number.isFinite(x0) ? { x0, y0, x1, y1 } : null;
 }

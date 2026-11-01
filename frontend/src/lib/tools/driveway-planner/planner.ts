@@ -6,7 +6,15 @@ import { footprint, minRadius, type Car } from './cars';
 import { pointInPolygon, shapeInside, wrap, type Pose, type Vec } from './geometry';
 import { arc, rsDistance, rsPaths, sampleRs, type RsPath } from './reedsShepp';
 
-export type PlanInput = { car: Car; buffer: number; area: Vec[]; start: Pose; goal: Pose };
+export type PlanInput = {
+	car: Car;
+	buffer: number;
+	area: Vec[];
+	start: Pose;
+	goal: Pose;
+	/** How the two ends are called in messages. */
+	names?: [string, string];
+};
 export type PlanResult = { ok: true; poses: Pose[]; gears: number[]; expanded: number } | { ok: false; error: string };
 
 const HEADINGS = 72;
@@ -64,13 +72,13 @@ class Heap {
 	}
 }
 
-export function plan({ car, buffer, area, start, goal }: PlanInput): PlanResult {
+export function plan({ car, buffer, area, start, goal, names = ['start', 'end'] }: PlanInput): PlanResult {
 	const bounded = area.length >= 3;
 	// A little slack in steering and clearance, so the editable spline fitted to the result
 	// (which only approximates it) still passes the same checks.
 	const free = (p: Pose) => !bounded || shapeInside(footprint(car, buffer + MARGIN, p), area);
-	if (!free(start)) return { ok: false, error: 'The car does not fit inside the area at the start.' };
-	if (!free(goal)) return { ok: false, error: 'The car does not fit inside the area at the end.' };
+	if (!free(start)) return { ok: false, error: `The car does not fit inside the area at the ${names[0]}.` };
+	if (!free(goal)) return { ok: false, error: `The car does not fit inside the area at the ${names[1]}.` };
 
 	const R = minRadius({ ...car, maxSteerDeg: car.maxSteerDeg * STEER_USE });
 	const kMax = 1 / R;

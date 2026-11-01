@@ -7,8 +7,8 @@
 	import { importPlan, type PlanImage } from './importPlan';
 	import PlanCanvas, { type Mode, type Playback } from './PlanCanvas.svelte';
 	import type { PlanInput, PlanResult } from './planner';
-	import type { LayerScene, Scene } from './render';
-	import { drive, fitDrivable, type Spline } from './spline';
+	import type { LayerScene, MarkerKind, Scene } from './render';
+	import { drive, fitDrivable, joinSplines, type Spline } from './spline';
 	import { multiArea, sweepPieces, unionOf } from './sweep';
 
 	type Layer = {
@@ -19,6 +19,7 @@
 		union: boolean;
 		car: Car;
 		start: Pose | null;
+		via: Pose | null;
 		end: Pose | null;
 		spline: Spline | null;
 		planning: boolean;
@@ -37,6 +38,7 @@
 			union: true,
 			car: { ...car },
 			start: null,
+			via: null,
 			end: null,
 			spline: null,
 			planning: false,
@@ -81,6 +83,7 @@
 			union: l.union,
 			car: l.car,
 			start: l.start,
+			via: l.via,
 			end: l.end,
 			spline: l.spline,
 			drive: drives[i],
@@ -118,7 +121,7 @@
 			area = [];
 			areaClosed = false;
 			ruler = null;
-			for (const l of layers) Object.assign(l, { start: null, end: null, spline: null, error: '' });
+			for (const l of layers) Object.assign(l, { start: null, via: null, end: null, spline: null, error: '' });
 			requestAnimationFrame(() => canvas?.fit());
 		} catch (e) {
 			fileError = e instanceof Error ? e.message : String(e);
@@ -136,6 +139,7 @@
 		if (ruler) ruler = [sv(ruler[0]), sv(ruler[1])];
 		for (const l of layers) {
 			l.start = sp(l.start);
+			l.via = sp(l.via);
 			l.end = sp(l.end);
 			if (l.spline) l.spline = { ...l.spline, pts: l.spline.pts.map(sv) };
 		}
@@ -159,16 +163,41 @@
 		for (const l of layers) l.error = '';
 	}
 
-	function setMarker(which: 'start' | 'end', pose: Pose) {
+	function setMarker(which: MarkerKind, pose: Pose, placing: boolean) {
 		const l = active;
 		if (!l) return;
+		if (Number.isNaN(pose.th)) {
+			// Clicked without dragging: a via point faces from start toward end.
+			const { start, end } = l;
+			pose = { ...pose, th: which === 'via' && start && end ? Math.atan2(end.y - start.y, end.x - start.x) : 0 };
+		}
+		const old = l[which];
 		l[which] = pose;
 		l.error = '';
-		if (l.spline) {
-			const pts = [...l.spline.pts];
-			pts[which === 'start' ? 0 : pts.length - 1] = { x: pose.x, y: pose.y };
-			l.spline = { ...l.spline, pts };
+		if (!l.spline) return;
+		// Putting down a new via point asks for a new route through it.
+		if (which === 'via' && placing) {
+			l.spline = null;
+			return;
 		}
+		const pts = [...l.spline.pts];
+		const i =
+			which === 'start'
+				? 0
+				: which === 'end'
+					? pts.length - 1
+					: old
+						? pts.findIndex((p) => dist(p, old) < 1e-6)
+						: -1;
+		if (i < 0) return;
+		pts[i] = { x: pose.x, y: pose.y };
+		l.spline = { ...l.spline, pts };
+	}
+
+	function removeVia(l: Layer) {
+		l.via = null;
+		l.spline = null;
+		l.error = '';
 	}
 
 	function setSpline(s: Spline) {
@@ -176,7 +205,6 @@
 	}
 
 	function startMode(m: Mode) {
-		if (m === 'area') setArea([], false);
 		if (m !== 'ruler') ruler = null;
 		mode = m;
 	}
@@ -207,22 +235,36 @@
 		l.planning = true;
 		l.error = '';
 		const car = $state.snapshot(l.car);
-		const start = { ...l.start };
-		const end = { ...l.end };
-		const result = await runPlan({
-			car,
-			buffer,
-			area: areaClosed ? $state.snapshot(area) : [],
-			start: rearFromFront(car, start),
-			goal: rearFromFront(car, end)
-		});
+		const stops = [l.start, l.via, l.end].filter((m) => m !== null).map((m) => ({ ...m }));
+		const zone = areaClosed ? $state.snapshot(area) : [];
+		// With a via point the route is planned in two legs that meet there.
+		const legs = await Promise.all(
+			stops.slice(1).map((to, i) =>
+				runPlan({
+					car,
+					buffer,
+					area: zone,
+					start: rearFromFront(car, stops[i]),
+					goal: rearFromFront(car, to),
+					names: [i ? 'via point' : 'start', to === stops[stops.length - 1] ? 'end' : 'via point']
+				})
+			)
+		);
 		l.planning = false;
 		// Markers moved while planning: that result is for a different question.
-		if (l.start?.x !== start.x || l.start?.y !== start.y || l.end?.x !== end.x || l.end?.y !== end.y) return;
-		if ('error' in result) l.error = result.error;
-		else {
-			l.spline = fitDrivable(car, buffer, areaClosed ? area : [], result.poses, result.gears, end.th);
+		const now = [l.start, l.via, l.end].filter((m) => m !== null);
+		if (now.length !== stops.length || now.some((m, i) => m.x !== stops[i].x || m.y !== stops[i].y)) return;
+		const failed = legs.findIndex((r) => 'error' in r);
+		if (failed >= 0) {
+			const r = legs[failed];
+			const prefix = legs.length > 1 ? (failed ? 'From the via point: ' : 'To the via point: ') : '';
+			l.error = prefix + ('error' in r ? r.error : '');
+			return;
 		}
+		const splines = legs.map((r, i) =>
+			'error' in r ? null! : fitDrivable(car, buffer, zone, r.poses, r.gears, stops[i + 1].th)
+		);
+		l.spline = splines.reduce((a, b) => joinSplines(a, b));
 	}
 
 	// Find a path as soon as both ends are placed.
@@ -307,10 +349,19 @@
 	const gearNow = $derived(playback && activeDrive ? activeDrive.gears[activeDrive.poses.indexOf(playback.pose)] : 0);
 
 	const modes: { id: Mode; label: string; hint: string; needsPlan?: boolean }[] = [
-		{ id: 'select', label: 'Select', hint: 'Drag empty space to pan, wheel to zoom. Drag markers, their arrow tips, path points and area corners.' },
+		{ id: 'select', label: 'Select', hint: 'Drag empty space to pan, wheel to zoom. Drag markers, their arrow tips and path points.' },
 		{ id: 'ruler', label: 'Ruler', hint: 'Drag along a known distance on the plan, then enter its real length.', needsPlan: true },
-		{ id: 'area', label: 'Area', hint: 'Click the corners of the area the driveway may use. Click the first corner or press Enter to close.' },
+		{
+			id: 'area',
+			label: 'Area',
+			hint: 'Click the corners of the area the driveway may use; click the first corner or press Enter to close it. Then drag corners to move them, double-click an edge to add one, select one and press Delete to remove it.'
+		},
 		{ id: 'start', label: 'Start', hint: 'Click where the middle of the front axle starts, drag in the driving direction.' },
+		{
+			id: 'via',
+			label: 'Via',
+			hint: 'Optional: click a position the route has to pass, to guide the planner. Drag to set the direction the car points there.'
+		},
 		{ id: 'end', label: 'End', hint: 'Click where the middle of the front axle ends, drag in the direction the car points.' }
 	];
 
@@ -479,7 +530,7 @@
 					<h2 class="flex items-center gap-1.5 font-semibold">
 						Area
 						<InfoHint
-							text="Where the car may drive. Without an area the planner ignores obstacles. Double-click an edge to add a corner, select a corner and press Delete to remove it."
+							text="Where the car may drive. Without an area the planner ignores obstacles. Edit it in Area mode: drag corners, double-click an edge to add one, select one and press Delete to remove it."
 						/>
 					</h2>
 					<div class="flex items-center gap-2">
@@ -488,7 +539,7 @@
 							type="button"
 							onclick={() => startMode('area')}
 							class="ml-auto rounded-md border border-line px-2.5 py-1 hover:border-accent hover:text-accent"
-							>{areaClosed ? 'Redraw' : 'Draw'}</button
+							>{areaClosed ? 'Edit' : 'Draw'}</button
 						>
 						{#if areaClosed}
 							<button
@@ -634,13 +685,24 @@
 												findPath(l);
 											}}
 											class="rounded-md border border-line bg-white px-2 py-0.5 hover:border-accent hover:text-accent disabled:opacity-40"
-											>{l.spline ? 'Find path again' : 'Find path'}</button
+											>{l.spline ? 'Find again' : 'Find path'}</button
 										>
 										{#if l.spline}
 											<InfoHint
 												text="The solid line is the middle of the front axle, the dashed one the rear axle. Drag its points to edit, double-click it to add a point, select one and press Delete to remove it. Diamonds are gear changes. Red means the car cannot drive it."
 											/>
 										{/if}
+										<button
+											type="button"
+											onclick={(e) => {
+												e.stopPropagation();
+												if (l.via) removeVia(l);
+												else startMode('via');
+											}}
+											class="ml-auto rounded-md border border-line bg-white px-2 py-0.5 hover:border-accent hover:text-accent"
+											title={l.via ? undefined : 'Add a position the route has to pass'}
+											>{l.via ? 'Remove via' : '+ Via point'}</button
+										>
 									</div>
 								{/if}
 							{/if}

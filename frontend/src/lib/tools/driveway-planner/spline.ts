@@ -217,3 +217,15 @@ export function removePoint(s: Spline, i: number): Spline {
 		gears
 	};
 }
+
+/** One spline driving `a` and then `b` (which starts where `a` ends). The joint stays a control point. */
+export function joinSplines(a: Spline, b: Spline): Spline {
+	const j = a.pts.length - 1;
+	const shift = b.cusps.map((c) => c + j);
+	const gearChange = a.gears[a.gears.length - 1] !== b.gears[0];
+	return {
+		pts: [...a.pts, ...b.pts.slice(1)],
+		cusps: [...a.cusps, ...(gearChange ? [j] : []), ...shift],
+		gears: [...a.gears, ...(gearChange ? b.gears : b.gears.slice(1))]
+	};
+}

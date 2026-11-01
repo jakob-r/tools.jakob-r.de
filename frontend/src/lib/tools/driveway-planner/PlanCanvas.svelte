@@ -1,6 +1,7 @@
 <script lang="ts" module>
-	export type Mode = 'select' | 'area' | 'ruler' | 'start' | 'end';
+	export type Mode = 'select' | 'area' | 'ruler' | MarkerKind;
 	export type Playback = { pose: Pose; steer: number; car: Car; color: string };
+	import type { MarkerKind } from './render';
 </script>
 
 <script lang="ts">
@@ -27,18 +28,19 @@
 		playback: Playback | null;
 		dragging?: boolean;
 		onarea: (pts: Vec[], closed: boolean) => void;
-		onmarker: (which: 'start' | 'end', pose: Pose) => void;
+		/** `placing` is true while a marker is being put down in its own mode, false when it is dragged. */
+		onmarker: (which: MarkerKind, pose: Pose, placing: boolean) => void;
 		onspline: (s: Spline) => void;
 	} = $props();
 
 	type View = { s: number; ox: number; oy: number };
 	type Drag =
 		| { kind: 'pan'; x: number; y: number; ox: number; oy: number }
-		| { kind: 'marker'; which: 'start' | 'end'; turn: boolean }
+		| { kind: 'marker'; which: MarkerKind; turn: boolean }
 		| { kind: 'spline'; i: number }
 		| { kind: 'area'; i: number }
 		| { kind: 'ruler' }
-		| { kind: 'place'; which: 'start' | 'end'; at: Vec };
+		| { kind: 'place'; which: MarkerKind; at: Vec };
 
 	let canvas: HTMLCanvasElement;
 	let width = $state(0);
@@ -76,7 +78,8 @@
 		return { x: (e.clientX - r.left - view!.ox) / view!.s, y: (e.clientY - r.top - view!.oy) / view!.s };
 	};
 
-	function markerOf(which: 'start' | 'end') {
+	const markers = ['start', 'via', 'end'] as const;
+	function markerOf(which: MarkerKind) {
 		return active?.[which] ?? null;
 	}
 	const tip = (m: Pose, s: number): Vec => ({ x: m.x + (Math.cos(m.th) * HANDLE) / s, y: m.y + (Math.sin(m.th) * HANDLE) / s });
@@ -84,18 +87,23 @@
 	/** What a select-mode press at `w` would grab. */
 	function hit(w: Vec): Drag | { kind: 'none' } {
 		const tol = HIT / view!.s;
-		for (const which of ['start', 'end'] as const) {
+		for (const which of markers) {
 			const m = markerOf(which);
 			if (m && dist(w, tip(m, view!.s)) < tol) return { kind: 'marker', which, turn: true };
 		}
-		for (const which of ['start', 'end'] as const) {
+		for (const which of markers) {
 			const m = markerOf(which);
 			if (m && dist(w, m) < tol * 1.3) return { kind: 'marker', which, turn: false };
 		}
 		const pts = active?.spline?.pts ?? [];
 		for (let i = 1; i < pts.length - 1; i++) if (dist(w, pts[i]) < tol) return { kind: 'spline', i };
-		if (scene.areaClosed) for (let i = 0; i < scene.area.length; i++) if (dist(w, scene.area[i]) < tol) return { kind: 'area', i };
 		return { kind: 'none' };
+	}
+
+	/** Area corner under `w` (area mode, once the outline is closed), or -1. */
+	function hitArea(w: Vec) {
+		if (!scene.areaClosed) return -1;
+		return scene.area.findIndex((p) => dist(w, p) < HIT / view!.s);
 	}
 
 	function pointerdown(e: PointerEvent) {
@@ -104,18 +112,24 @@
 		const w = toWorld(e);
 		const pan = (): Drag => ({ kind: 'pan', x: e.clientX, y: e.clientY, ox: view!.ox, oy: view!.oy });
 		if (e.button === 1) drag = pan();
-		else if (mode === 'area') {
+		else if (mode === 'area' && scene.areaClosed) {
+			// The outline stays and is edited in place.
+			const i = hitArea(w);
+			selected = i >= 0 ? { kind: 'area', i } : null;
+			drag = i >= 0 ? { kind: 'area', i } : pan();
+		} else if (mode === 'area') {
 			if (draft.length >= 3 && dist(w, draft[0]) < (HIT * 1.5) / view.s) finishArea();
 			else draft = [...draft, w];
 		} else if (mode === 'ruler') {
 			ruler = [w, w];
 			drag = { kind: 'ruler' };
-		} else if (mode === 'start' || mode === 'end') {
-			onmarker(mode, { x: w.x, y: w.y, th: markerOf(mode)?.th ?? 0 });
+		} else if (mode === 'start' || mode === 'via' || mode === 'end') {
+			// NaN: no direction yet, the tool picks a sensible one unless the user drags.
+			onmarker(mode, { x: w.x, y: w.y, th: markerOf(mode)?.th ?? NaN }, true);
 			drag = { kind: 'place', which: mode, at: w };
 		} else {
 			const h = hit(w);
-			selected = h.kind === 'spline' || h.kind === 'area' ? { kind: h.kind, i: h.i } : null;
+			selected = h.kind === 'spline' ? { kind: h.kind, i: h.i } : null;
 			drag = h.kind === 'none' ? pan() : h;
 		}
 		dragging = drag !== null && drag.kind !== 'pan';
@@ -126,7 +140,7 @@
 		const w = toWorld(e);
 		pointer = w;
 		if (!drag) {
-			hoverKind = mode === 'select' ? hit(w).kind : '';
+			hoverKind = mode === 'select' ? hit(w).kind : mode === 'area' && hitArea(w) >= 0 ? 'area' : '';
 			return;
 		}
 		switch (drag.kind) {
@@ -136,12 +150,12 @@
 			case 'marker': {
 				const m = markerOf(drag.which);
 				if (!m) break;
-				onmarker(drag.which, drag.turn ? { ...m, th: Math.atan2(w.y - m.y, w.x - m.x) } : { ...m, x: w.x, y: w.y });
+				onmarker(drag.which, drag.turn ? { ...m, th: Math.atan2(w.y - m.y, w.x - m.x) } : { ...m, x: w.x, y: w.y }, false);
 				break;
 			}
 			case 'place':
 				if (dist(w, drag.at) > HIT / view.s)
-					onmarker(drag.which, { ...drag.at, th: Math.atan2(w.y - drag.at.y, w.x - drag.at.x) });
+					onmarker(drag.which, { ...drag.at, th: Math.atan2(w.y - drag.at.y, w.x - drag.at.x) }, true);
 				break;
 			case 'spline': {
 				const s = active?.spline;
@@ -167,11 +181,11 @@
 	}
 
 	function dblclick(e: MouseEvent) {
-		if (!view || mode !== 'select') return;
+		if (!view) return;
 		const w = toWorld(e);
 		const tol = HIT / view.s;
 		const s = active?.spline;
-		if (s) {
+		if (mode === 'select' && s) {
 			const near = nearestSpan(s.pts, w, false);
 			if (near && near.d < tol) {
 				onspline(insertPoint(s, near.i, w));
@@ -179,7 +193,7 @@
 				return;
 			}
 		}
-		if (scene.areaClosed) {
+		if (mode === 'area' && scene.areaClosed) {
 			const near = nearestSpan(scene.area, w, true);
 			if (near && near.d < tol) {
 				onarea([...scene.area.slice(0, near.i + 1), w, ...scene.area.slice(near.i + 1)], true);
@@ -207,9 +221,9 @@
 	function keydown(e: KeyboardEvent) {
 		const t = e.target as HTMLElement;
 		if (t.closest('input, select, textarea, [contenteditable]')) return;
-		if (mode === 'area' && e.key === 'Enter') finishArea();
+		if (draft.length && e.key === 'Enter') finishArea();
 		else if (e.key === 'Escape') {
-			if (mode === 'area') finishArea();
+			if (draft.length) finishArea();
 			else mode = 'select';
 			selected = null;
 		} else if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
@@ -260,7 +274,7 @@
 			ctx.stroke();
 			draft.forEach((p, i) => handle(ctx, p, px, i === 0 && draft.length >= 3 ? '#10b981' : '#fff', '#10b981', 'square'));
 		}
-		if (mode === 'select' && scene.areaClosed)
+		if (mode === 'area' && scene.areaClosed)
 			scene.area.forEach((p, i) =>
 				handle(ctx, p, px, selected?.kind === 'area' && selected.i === i ? '#10b981' : '#fff', '#10b981', 'square')
 			);
@@ -271,7 +285,7 @@
 				handle(ctx, p, px, sel ? active.color : '#fff', active.color, active.spline!.cusps.includes(i) ? 'diamond' : 'circle');
 			});
 		if (active?.visible)
-			for (const m of [active.start, active.end])
+			for (const m of [active.start, active.via, active.end])
 				if (m) handle(ctx, tip(m, v.s), px, '#fff', '#334155', 'circle');
 		if (ruler) {
 			ctx.beginPath();
@@ -350,11 +364,11 @@
 	}
 
 	const cursor = $derived(
-		mode !== 'select'
-			? 'crosshair'
-			: hoverKind === 'marker' || hoverKind === 'spline' || hoverKind === 'area'
-				? 'move'
-				: 'grab'
+		hoverKind === 'marker' || hoverKind === 'spline' || hoverKind === 'area'
+			? 'move'
+			: mode === 'select' || (mode === 'area' && scene.areaClosed)
+				? 'grab'
+				: 'crosshair'
 	);
 </script>
 

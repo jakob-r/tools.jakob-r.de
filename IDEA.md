@@ -146,3 +146,26 @@ Despite the one-click automation, users must retain control. They can:
 
 * **GPX Tag Preservation:** The exporter must faithfully preserve all non-location data, including `<time>`, `<ele>` (elevation), and `<extensions>` (Heart Rate, Cadence, Power, Temperature).
 * **Single Segment Preference:** Rather than splitting the GPX into multiple `<trkseg>` blocks (which breaks platforms like Strava), the cleaned file exports as a single continuous segment. Pauses are handled simply by a large timestamp gap between two points, which modern fitness platforms interpret correctly as a pause.
+
+
+### Driveway Planner
+
+A tool to plan the dimensions of the driveway of a house.
+
+1. User uploads a plan of the property, the plan will be shown in a draggable canvas.
+2. User can specify the scale of the plan by entering it manually or using a ruler.
+3. The user draws a polygon which specifies the area in which the driveway can be built.
+4. The user specifies the car dimensions but can also select from a list of popular car dimensions. (The list should include Tesla Model Y, VW ID.3, etc.) We need length and width (including mirrors), wheel distances and max steering angle
+5. The user specifies a buffer distance around the car dimensions.
+6. The user defines start and end points, including directions of the driveway
+7. The planer automatically finds a path from start to end point
+8. The main spline will be the middle of the front axle, the secondary spline will be the middle of the rear axle.
+9. The tool draws the pathway as the area that is covered by the car during the drive from start to end point.
+
+- The tool should allow import of SVG, PNG, PDF (pixelation is fine), JPG, etc for the property plan.
+- The tool should allow export as SVG and PNG.
+- The main spline should be editable by the user after the initial path is found. If the spline results in a invalid path, the path will be marked as such.
+- There is a play button that shows the movements of the car during the drive from start to end point.
+- We can have multiple layers of start and end points
+- We can select the layers that contribute to the union of the final pathway.
+- Ideally the tool can also figure out K-Turn or 3-Point Turn, if needed.

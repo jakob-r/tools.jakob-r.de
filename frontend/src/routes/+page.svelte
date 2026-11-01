@@ -55,6 +55,8 @@
 		<span aria-hidden="true">·</span>
 		<a href="https://github.com/jakob-r/tools.jakob-r.de" class="underline underline-offset-4 hover:text-accent">Source</a>
 		<span aria-hidden="true">·</span>
+		<a href="https://github.com/jakob-r/tools.jakob-r.de/blob/main/LICENSE" class="underline underline-offset-4 hover:text-accent">License</a>
+		<span aria-hidden="true">·</span>
 		<a href="https://www.jakob-r.de/legal-notice/" class="underline underline-offset-4 hover:text-accent">Legal notice</a>
 		<span aria-hidden="true">·</span>
 		<a href="https://www.jakob-r.de/privacy/" class="underline underline-offset-4 hover:text-accent">Privacy</a>

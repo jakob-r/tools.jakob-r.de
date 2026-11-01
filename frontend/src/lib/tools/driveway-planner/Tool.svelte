@@ -1,4 +1,5 @@
 <script lang="ts">
+	import CopyButton from '#lib/core/CopyButton.svelte';
 	import InfoHint from '#lib/core/InfoHint.svelte';
 	import type { MultiPolygon } from 'polygon-clipping';
 	import { presets, rearFromFront, type Car } from './cars';
@@ -8,6 +9,7 @@
 	import PlanCanvas, { type Mode, type Playback } from './PlanCanvas.svelte';
 	import type { PlanInput, PlanResult } from './planner';
 	import type { LayerScene, MarkerKind, Scene } from './render';
+	import { decodeState, encodeState, type SharedState } from './share';
 	import { drive, fitDrivable, joinSplines, type Spline } from './spline';
 	import { multiArea, sweepPieces, unionOf } from './sweep';
 
@@ -47,6 +49,8 @@
 	}
 
 	let plan = $state.raw<PlanImage | null>(null);
+	/** Name and pixel size of the plan the drawing belongs to; known even when the image is not. */
+	let planInfo = $state.raw<SharedState['plan']>(null);
 	let started = $state(false);
 	let fileError = $state('');
 	let dragOver = $state(false);
@@ -114,19 +118,80 @@
 			const img = await importPlan(file);
 			fileError = '';
 			plan = img;
-			dpi = Math.round(img.dpi);
-			// Assume 1:100 until the user sets the scale.
-			mpp = (0.0254 / img.dpi) * 100;
 			started = true;
-			area = [];
-			areaClosed = false;
 			ruler = null;
-			for (const l of layers) Object.assign(l, { start: null, via: null, end: null, spline: null, error: '' });
+			// The same plan again (e.g. after opening a shared link): keep the drawing and its scale.
+			const same = planInfo && planInfo.width === img.width && planInfo.height === img.height;
+			planInfo = { name: img.name, width: img.width, height: img.height };
+			if (!same) {
+				dpi = Math.round(img.dpi);
+				// Assume 1:100 until the user sets the scale.
+				mpp = (0.0254 / img.dpi) * 100;
+				area = [];
+				areaClosed = false;
+				for (const l of layers) Object.assign(l, { start: null, via: null, end: null, spline: null, error: '' });
+			}
 			requestAnimationFrame(() => canvas?.fit());
 		} catch (e) {
 			fileError = e instanceof Error ? e.message : String(e);
 		}
 	}
+
+	// --- Sharing via the URL hash -----------------------------------------------------------
+
+	const shareCode = $derived(
+		started
+			? encodeState({
+					plan: planInfo,
+					mpp,
+					dpi,
+					buffer,
+					area,
+					areaClosed,
+					active: Math.max(0, layers.findIndex((l) => l.id === activeId)),
+					layers
+				})
+			: ''
+	);
+	const shareUrl = $derived(shareCode && `${location.origin}${location.pathname}#${shareCode}`);
+	let writtenHash = '';
+
+	// Keep the address bar current, so the link can be copied from there too.
+	$effect(() => {
+		const code = shareCode;
+		if (!code || dragging) return;
+		const t = setTimeout(() => {
+			writtenHash = `#${code}`;
+			history.replaceState(history.state, '', `${location.pathname}${location.search}${writtenHash}`);
+		}, 300);
+		return () => clearTimeout(t);
+	});
+
+	function applyShared(s: SharedState) {
+		started = true;
+		if (plan && !(s.plan && plan.width === s.plan.width && plan.height === s.plan.height)) plan = null;
+		planInfo = s.plan;
+		mpp = s.mpp;
+		dpi = s.dpi;
+		buffer = s.buffer;
+		area = s.area;
+		areaClosed = s.areaClosed;
+		ruler = null;
+		mode = 'select';
+		nextId = 1;
+		layers = s.layers.length ? s.layers.map((l) => ({ ...newLayer(), ...l })) : [newLayer()];
+		activeId = (layers[s.active] ?? layers[0]).id;
+		requestAnimationFrame(() => canvas?.fit());
+	}
+
+	function onHashChange() {
+		if (location.hash === writtenHash) return;
+		const s = decodeState(location.hash);
+		if (s) applyShared(s);
+	}
+
+	const initial = decodeState(location.hash);
+	if (initial) applyShared(initial);
 
 	/** Change the scale and keep everything drawn on the plan in place. */
 	function setMpp(next: number) {
@@ -370,6 +435,7 @@
 </script>
 
 <svelte:window
+	onhashchange={onHashChange}
 	ondragover={(e) => {
 		e.preventDefault();
 		dragOver = true;
@@ -429,6 +495,12 @@
 						>Driveway <span class="font-medium text-ink tabular-nums">{fmt(pathwayArea)} m²</span></span
 					>
 				{/if}
+				<span class="flex items-center gap-1.5">
+					<CopyButton text={shareUrl} label="Copy link" />
+					<InfoHint
+						text="The link (also in the address bar) holds the whole plan except the background image, which stays in your browser. Send the plan file along; opening it on the shared drawing keeps everything in place."
+					/>
+				</span>
 				<button
 					type="button"
 					onclick={() => exportSvg(scene, fileName)}
@@ -447,6 +519,14 @@
 
 	{#if fileError}
 		<div class="border-b border-red-200 bg-red-50 px-4 py-1.5 text-xs text-red-700">{fileError}</div>
+	{/if}
+
+	{#if started && planInfo && !plan}
+		<div class="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-800">
+			This drawing was made on <span class="font-medium">{planInfo.name}</span>. Open that file to see it underneath; images
+			are never part of the link.
+			{@render openButton('Open plan…')}
+		</div>
 	{/if}
 
 	{#if started}

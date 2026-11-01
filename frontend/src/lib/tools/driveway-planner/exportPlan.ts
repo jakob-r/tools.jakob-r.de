@@ -1,7 +1,7 @@
 import type { MultiPolygon } from 'polygon-clipping';
 import { footprint, rearFromFront } from './cars';
 import type { Vec } from './geometry';
-import { colors, drawScene, sceneBounds, type Scene } from './render';
+import { colors, drawCar, drawScene, sceneBounds, type LayerScene, type Scene } from './render';
 import { unionOf } from './sweep';
 
 const MARGIN = 1;
@@ -84,4 +84,105 @@ export async function exportPng(scene: Scene, name: string) {
 	drawScene(ctx, scene, px);
 	const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'));
 	if (blob) download(blob, `${name}.png`);
+}
+
+/** Long side of the video in pixels. */
+const VIDEO_SIZE = 1920;
+/** Seconds the car stands still at the start and the end. */
+const VIDEO_HOLD = 0.8;
+
+function videoType() {
+	return ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find((t) =>
+		MediaRecorder.isTypeSupported(t)
+	);
+}
+
+export const canExportVideo = () =>
+	typeof MediaRecorder !== 'undefined' && 'captureStream' in HTMLCanvasElement.prototype && !!videoType();
+
+/**
+ * Records the car driving `layer` as a video, framed on that route. MediaRecorder works in real
+ * time, so this takes as long as the video lasts. Resolves false when cancelled.
+ */
+export async function exportVideo(
+	scene: Scene,
+	layer: LayerScene,
+	name: string,
+	speed: number,
+	onprogress: (f: number) => boolean
+) {
+	const drive = layer.drive;
+	const type = videoType();
+	if (!drive || !type) return false;
+	// The recorded route shows even when it is hidden in the editor.
+	scene = { ...scene, layers: scene.layers.map((l) => (l.id === layer.id ? { ...l, visible: true } : l)) };
+	const b = sceneBounds({ ...scene, plan: null, area: [], layers: [layer] });
+	if (!b) return false;
+	const m = 2 * MARGIN;
+	let [x, y, w, h] = [b.x0 - m, b.y0 - m, b.x1 - b.x0 + 2 * m, b.y1 - b.y0 + 2 * m];
+	// 16:9 landscape, centered on the route.
+	if (w / h < 16 / 9) [x, w] = [x - (h * (16 / 9) - w) / 2, h * (16 / 9)];
+	else [y, h] = [y - (w / (16 / 9) - h) / 2, w / (16 / 9)];
+	const canvas = document.createElement('canvas');
+	canvas.width = VIDEO_SIZE;
+	canvas.height = Math.round((VIDEO_SIZE * 9) / 16 / 2) * 2;
+	const ppm = canvas.width / w;
+	const px = 1.5 / ppm;
+	const ctx = canvas.getContext('2d')!;
+
+	const cumulative = [0];
+	for (let i = 1; i < drive.front.length; i++)
+		cumulative.push(cumulative[i - 1] + Math.hypot(drive.front[i].x - drive.front[i - 1].x, drive.front[i].y - drive.front[i - 1].y));
+	const total = cumulative[cumulative.length - 1];
+	const duration = total / speed + 2 * VIDEO_HOLD;
+
+	let i = 0;
+	const frame = (pos: number) => {
+		while (i < cumulative.length - 1 && cumulative[i] < pos) i++;
+		ctx.setTransform(1, 0, 0, 1, 0, 0);
+		ctx.fillStyle = scene.plan ? '#fff' : '#f8fafc';
+		ctx.fillRect(0, 0, canvas.width, canvas.height);
+		ctx.setTransform(ppm, 0, 0, ppm, -x * ppm, -y * ppm);
+		if (!scene.plan) {
+			ctx.beginPath();
+			for (let gx = Math.floor(x); gx <= x + w; gx++) ctx.rect(gx, y, 0, h);
+			for (let gy = Math.floor(y); gy <= y + h; gy++) ctx.rect(x, gy, w, 0);
+			ctx.strokeStyle = '#e2e8f0';
+			ctx.lineWidth = px;
+			ctx.stroke();
+		}
+		drawScene(ctx, scene, px);
+		drawCar(ctx, layer.car, drive.poses[i], drive.steer[i], layer.color, px);
+		ctx.setTransform(1, 0, 0, 1, 0, 0);
+		const label = `${layer.name} · ${drive.gears[i] < 0 ? 'Reverse' : 'Forward'} · ${pos.toFixed(1)} / ${total.toFixed(1)} m`;
+		ctx.font = '500 28px system-ui, sans-serif';
+		const tw = ctx.measureText(label).width;
+		ctx.fillStyle = 'rgba(255,255,255,0.85)';
+		ctx.beginPath();
+		ctx.roundRect(24, canvas.height - 76, tw + 32, 52, 10);
+		ctx.fill();
+		ctx.fillStyle = '#1e293b';
+		ctx.fillText(label, 40, canvas.height - 40);
+	};
+
+	frame(0);
+	const recorder = new MediaRecorder(canvas.captureStream(30), { mimeType: type, videoBitsPerSecond: 8e6 });
+	const chunks: Blob[] = [];
+	recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+	const stopped = new Promise((r) => (recorder.onstop = r));
+	recorder.start();
+	const t0 = performance.now();
+	const done = await new Promise<boolean>((resolve) =>
+		requestAnimationFrame(function tick(now) {
+			const t = (now - t0) / 1000;
+			if (!onprogress(Math.min(1, t / duration))) return resolve(false);
+			frame(Math.max(0, Math.min(total, (t - VIDEO_HOLD) * speed)));
+			if (t >= duration) resolve(true);
+			else requestAnimationFrame(tick);
+		})
+	);
+	recorder.stop();
+	await stopped;
+	if (done) download(new Blob(chunks, { type }), `${name}.${type.startsWith('video/mp4') ? 'mp4' : 'webm'}`);
+	return done;
 }

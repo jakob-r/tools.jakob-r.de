@@ -5,7 +5,7 @@
 	import { untrack } from 'svelte';
 	import { presets, rearFromFront, type Car } from './cars';
 	import { dist, type Pose, type Vec } from './geometry';
-	import { exportPng, exportSvg } from './exportPlan';
+	import { canExportVideo, exportPng, exportSvg, exportVideo } from './exportPlan';
 	import { importPlan, planFromDataUrl, type PlanImage } from './importPlan';
 	import PlanCanvas, { type Mode, type Playback } from './PlanCanvas.svelte';
 	import type { PlanInput, PlanResult } from './planner';
@@ -404,6 +404,20 @@
 		mode = 'start';
 	}
 
+	function duplicateLayer() {
+		if (!active) return;
+		const { name, union, car, start, via, end, spline, error } = $state.snapshot(active);
+		const l = { ...newLayer(), name: `${name} copy`, union, car, start, via, end, spline, error };
+		layers.splice(layers.indexOf(active) + 1, 0, l);
+		activeId = l.id;
+	}
+
+	/** Shows just this route, or everything again when it already is the only one shown. */
+	function soloLayer(id: string) {
+		const solo = layers.every((l) => l.visible === (l.id === id));
+		for (const l of layers) l.visible = solo || l.id === id;
+	}
+
 	function removeLayer(id: string) {
 		layers = layers.filter((l) => l.id !== id);
 		if (!layers.length) layers.push(newLayer());
@@ -476,7 +490,25 @@
 		}
 		return { pose: d.poses[lo], steer: d.steer[lo], car: active.car, color: active.color };
 	});
-	const gearNow = $derived(playback && activeDrive ? activeDrive.gears[activeDrive.poses.indexOf(playback.pose)] : 0);
+	/** Progress of the video being recorded, or null. */
+	let recording = $state<number | null>(null);
+	async function recordVideo() {
+		if (recording !== null) {
+			recording = null;
+			return;
+		}
+		if (!activeScene?.drive) return;
+		const id = activeId;
+		recording = 0;
+		await exportVideo(scene, activeScene, `${fileName}-${activeScene.name}`, SPEED, (f) => {
+			if (recording === null || activeId !== id) return false;
+			recording = f;
+			return true;
+		});
+		recording = null;
+	}
+
+	const gearNow =$derived(playback && activeDrive ? activeDrive.gears[activeDrive.poses.indexOf(playback.pose)] : 0);
 
 	const modes: { id: Mode; label: string; hint: string; needsPlan?: boolean }[] = [
 		{ id: 'select', label: 'Select', hint: 'Drag empty space to pan, wheel to zoom. Drag markers, their arrow tips and path points.' },
@@ -787,6 +819,19 @@
 							onclick={addLayer}
 							class="ml-auto rounded-md border border-line px-2 py-0.5 font-normal hover:border-accent hover:text-accent">+ Add</button
 						>
+						<button
+							type="button"
+							onclick={duplicateLayer}
+							disabled={!active}
+							class="grid place-items-center rounded-md border border-line px-1.5 py-1 font-normal hover:border-accent hover:text-accent disabled:opacity-40"
+							aria-label="Duplicate selected route"
+							title="Duplicate selected route"
+						>
+							<svg viewBox="0 0 24 24" class="size-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<rect x="9" y="9" width="12" height="12" rx="2" />
+								<path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+							</svg>
+						</button>
 					</h2>
 					{#each layers as l, i (l.id)}
 						{@const d = drives[i]}
@@ -817,9 +862,13 @@
 										e.stopPropagation();
 										l.visible = !l.visible;
 									}}
+									ondblclick={(e) => {
+										e.stopPropagation();
+										soloLayer(l.id);
+									}}
 									class="text-mute hover:text-accent"
 									aria-label={l.visible ? 'Hide route' : 'Show route'}
-									title={l.visible ? 'Hide route' : 'Show route'}
+									title="{l.visible ? 'Hide route' : 'Show route'} (double-click: show only this one)"
 								>
 									<svg viewBox="0 0 24 24" class="size-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 										<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
@@ -933,6 +982,18 @@
 						{/if}
 						{fmt(playPos)} / {fmt(total)} m
 					</span>
+					{#if canExportVideo()}
+						<button
+							type="button"
+							onclick={recordVideo}
+							disabled={!activeDrive && recording === null}
+							class="w-28 rounded-md border border-line px-2.5 py-1 whitespace-nowrap hover:border-accent hover:text-accent disabled:opacity-40"
+							title={recording === null
+								? 'Records the car driving this route, framed on it. Takes as long as the video lasts; keep this tab in front.'
+								: 'Cancel'}
+							>{recording === null ? 'Export video' : `Recording ${Math.round(recording * 100)} %`}</button
+						>
+					{/if}
 				</div>
 			</div>
 		</div>

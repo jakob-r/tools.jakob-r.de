@@ -5,12 +5,12 @@
 	import { presets, rearFromFront, type Car } from './cars';
 	import { dist, type Pose, type Vec } from './geometry';
 	import { exportPng, exportSvg } from './exportPlan';
-	import { importPlan, type PlanImage } from './importPlan';
+	import { importPlan, planFromDataUrl, type PlanImage } from './importPlan';
 	import PlanCanvas, { type Mode, type Playback } from './PlanCanvas.svelte';
 	import type { PlanInput, PlanResult } from './planner';
 	import type { LayerScene, MarkerKind, Scene } from './render';
 	import { exampleSvg, examples, type Example } from './examples';
-	import { decodeState, encodeState, type SharedState } from './share';
+	import { decodeState, encodeState, parseProject, projectJson, type SharedState } from './share';
 	import { drive, fitDrivable, joinSplines, type Spline } from './spline';
 	import { multiArea, sweepPieces, unionOf } from './sweep';
 
@@ -115,6 +115,7 @@
 
 	async function open(file: File | undefined) {
 		if (!file) return;
+		if (file.type === 'application/json' || /\.json$/i.test(file.name)) return openProject(file);
 		try {
 			const img = await importPlan(file);
 			fileError = '';
@@ -140,20 +141,20 @@
 
 	// --- Sharing via the URL hash -----------------------------------------------------------
 
-	const shareCode = $derived(
-		started
-			? encodeState({
-					plan: planInfo,
-					mpp,
-					dpi,
-					buffer,
-					area,
-					areaClosed,
-					active: Math.max(0, layers.findIndex((l) => l.id === activeId)),
-					layers
-				})
-			: ''
-	);
+	/** Everything worth keeping, as plain data (for the link and for saved files). */
+	const sharedState = $derived<SharedState>({
+		plan: planInfo,
+		mpp,
+		dpi,
+		buffer,
+		area,
+		areaClosed,
+		active: Math.max(0, layers.findIndex((l) => l.id === activeId)),
+		layers: layers.map(({ name, color, visible, union, car, start, via, end, spline }) =>
+			$state.snapshot({ name, color, visible, union, car, start, via, end, spline })
+		)
+	});
+	const shareCode = $derived(started ? encodeState(sharedState) : '');
 	const shareUrl = $derived(shareCode && `${location.origin}${location.pathname}#${shareCode}`);
 	let writtenHash = '';
 
@@ -183,6 +184,34 @@
 		layers = s.layers.length ? s.layers.map((l) => ({ ...newLayer(), ...l })) : [newLayer()];
 		activeId = (layers[s.active] ?? layers[0]).id;
 		requestAnimationFrame(() => canvas?.fit());
+	}
+
+	// --- Saved files: the same state as JSON, with the background embedded as Base64 ----------
+
+	function saveProject() {
+		const json = projectJson(
+			sharedState,
+			plan ? { name: plan.name, dpi: plan.dpi, dataUrl: plan.dataUrl } : null
+		);
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+		a.download = `${fileName}.json`;
+		a.click();
+		setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+	}
+
+	async function openProject(file: File) {
+		try {
+			const { state, image } = parseProject(await file.text());
+			const img = image ? await planFromDataUrl(image.dataUrl, image.name, image.dpi) : null;
+			fileError = '';
+			plan = img;
+			applyShared(
+				img ? { ...state, plan: { name: img.name, width: img.width, height: img.height } } : state
+			);
+		} catch (e) {
+			fileError = e instanceof Error ? e.message : String(e);
+		}
 	}
 
 	function onHashChange() {
@@ -504,7 +533,7 @@
 		{label}
 		<input
 			type="file"
-			accept="image/*,.svg,.pdf,application/pdf"
+			accept="image/*,.svg,.pdf,application/pdf,.json,application/json"
 			class="hidden"
 			onchange={(e) => open(e.currentTarget.files?.[0])}
 		/>
@@ -545,6 +574,15 @@
 					>
 				{/if}
 				<span class="flex items-center gap-1.5">
+					<button
+						type="button"
+						onclick={saveProject}
+						class="rounded-md border border-line bg-white px-2.5 py-1 text-xs font-medium whitespace-nowrap hover:border-accent hover:text-accent"
+						>Save</button
+					>
+					<InfoHint
+						text="Downloads the whole plan as a .json file, background image included. Open it again with “Open plan…” or by dropping it here."
+					/>
 					<CopyButton text={shareUrl} label="Copy link" />
 					<InfoHint
 						text="The link (also in the address bar) holds the whole plan except the background image, which stays in your browser. Send the plan file along; opening it on the shared drawing keeps everything in place."
@@ -886,10 +924,10 @@
 			>
 				<span class="text-4xl">🏡</span>
 				<span class="font-medium">Drop a property plan here or click to open one</span>
-				<span class="text-sm text-mute">PNG, JPG, SVG or PDF. It is processed in your browser and never uploaded.</span>
+				<span class="text-sm text-mute">PNG, JPG, SVG or PDF, or a saved .json plan. It is processed in your browser and never uploaded.</span>
 				<input
 					type="file"
-					accept="image/*,.svg,.pdf,application/pdf"
+					accept="image/*,.svg,.pdf,application/pdf,.json,application/json"
 					class="hidden"
 					onchange={(e) => open(e.currentTarget.files?.[0])}
 				/>

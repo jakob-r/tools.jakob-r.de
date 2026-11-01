@@ -20,17 +20,22 @@ export async function importPlan(file: File): Promise<PlanImage> {
 		r.onerror = () => reject(new Error('Could not read the file.'));
 		r.readAsDataURL(file);
 	});
+	return planFromDataUrl(dataUrl, file.name, 96);
+}
+
+/** A plan from an image data URL, e.g. one embedded in a saved project. */
+export async function planFromDataUrl(dataUrl: string, name: string, dpi: number): Promise<PlanImage> {
 	const img = new Image();
 	img.src = dataUrl;
 	try {
 		await img.decode();
 	} catch {
-		throw new Error(`${file.name} is not an image this browser can show.`);
+		throw new Error(`${name} is not an image this browser can show.`);
 	}
 	// SVGs without width/height report 0 here; give them a usable size.
 	const width = img.naturalWidth || 1000;
 	const height = img.naturalHeight || Math.round(width * 0.75);
-	return { source: img, width, height, dataUrl, name: file.name, dpi: 96 };
+	return { source: img, width, height, dataUrl, name, dpi };
 }
 
 async function importPdf(file: File): Promise<PlanImage> {

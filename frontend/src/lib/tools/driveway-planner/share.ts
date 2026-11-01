@@ -104,3 +104,75 @@ export function decodeState(hash: string): SharedState | null {
 		return null;
 	}
 }
+
+// --- Project files ---------------------------------------------------------------------------
+// Readable JSON with the same state as the link, plus the background as a Base64 data URL.
+
+const FORMAT = 'driveway-planner';
+
+export type ProjectImage = { name: string; dpi: number; dataUrl: string };
+
+export function projectJson(state: SharedState, image: ProjectImage | null) {
+	return JSON.stringify({ format: FORMAT, version: 1, state, image }, null, 1);
+}
+
+export function parseProject(text: string): { state: SharedState; image: ProjectImage | null } {
+	let raw: any;
+	try {
+		raw = JSON.parse(text);
+	} catch {
+		throw new Error('This file is not valid JSON.');
+	}
+	if (raw?.format !== FORMAT || !raw.state) throw new Error('This JSON file is not a saved driveway plan.');
+	const s = raw.state;
+	const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
+	const isNum = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
+	const vec = (p: any): Vec | null => (p && isNum(p.x) && isNum(p.y) ? { x: p.x, y: p.y } : null);
+	const vecs = (a: unknown): Vec[] => (Array.isArray(a) ? a.map(vec).filter((p) => p !== null) : []);
+	const pose = (p: any): Pose | null => (vec(p) && isNum(p.th) ? { x: p.x, y: p.y, th: p.th } : null);
+	const ints = (a: unknown): number[] => (Array.isArray(a) ? a.filter((v) => Number.isInteger(v)) : []);
+	const image = raw.image;
+	return {
+		state: {
+			plan: s.plan && typeof s.plan.name === 'string' ? { name: s.plan.name, width: num(s.plan.width, 0), height: num(s.plan.height, 0) } : null,
+			mpp: num(s.mpp, 0.0254),
+			dpi: num(s.dpi, 96),
+			buffer: num(s.buffer, 0.3),
+			area: vecs(s.area),
+			areaClosed: !!s.areaClosed,
+			active: num(s.active, 0),
+			layers: (Array.isArray(s.layers) ? s.layers : []).map((l: any) => {
+				const c = l.car ?? {};
+				const spline = l.spline && {
+					pts: vecs(l.spline.pts),
+					cusps: ints(l.spline.cusps),
+					gears: ints(l.spline.gears)
+				};
+				return {
+					name: String(l.name ?? 'Route'),
+					color: typeof l.color === 'string' ? l.color : '#6366f1',
+					visible: l.visible !== false,
+					union: l.union !== false,
+					car: {
+						name: String(c.name ?? 'Custom'),
+						length: num(c.length, 4.8),
+						width: num(c.width, 2.1),
+						wheelbase: num(c.wheelbase, 2.9),
+						track: num(c.track, 1.6),
+						frontOverhang: num(c.frontOverhang, 0.9),
+						maxSteerDeg: num(c.maxSteerDeg, 33)
+					},
+					start: pose(l.start),
+					via: pose(l.via),
+					end: pose(l.end),
+					spline:
+						spline && spline.pts.length >= 2 && spline.gears.length === spline.cusps.length + 1 ? spline : null
+				};
+			})
+		},
+		image:
+			image && typeof image.dataUrl === 'string' && image.dataUrl.startsWith('data:image/')
+				? { name: String(image.name ?? 'plan'), dpi: num(image.dpi, 96), dataUrl: image.dataUrl }
+				: null
+	};
+}

@@ -1,0 +1,43 @@
+<!doctype html>
+<!-- Source of frontend/static/og.png (share image). Render with `make og`. -->
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+	html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; color: #1e293b; }
+	body { position: relative; font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+		background: radial-gradient(circle at 85% 40%, #e0e7ff 0, #eef2ff 35%, #f8fafc 75%); }
+	.text { position: absolute; left: 80px; top: 140px; width: 500px; }
+	.brand { display: flex; align-items: center; gap: 14px; font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+	.logo { width: 46px; height: 46px; border-radius: 11px; background: #6366f1; color: #fff; display: grid; place-items: center; font-size: 24px; }
+	h1 { font-size: 64px; line-height: 1.05; letter-spacing: -0.025em; margin: 34px 0 22px; }
+	p { font-size: 27px; line-height: 1.4; margin: 0; color: #64748b; }
+	.lock { margin-top: 30px; display: inline-flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 600; color: #4f46e5; background: #fff; border: 2px solid #c7d2fe; border-radius: 999px; padding: 8px 18px; }
+	.grid { position: absolute; left: 630px; top: 36px; display: grid; grid-template-columns: 250px 250px; gap: 22px; transform: rotate(-3deg); }
+	.card { background: #fff; border: 2px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 12px 30px -12px rgba(30, 41, 59, 0.25); }
+	.card:nth-child(even) { transform: translateY(46px); }
+	.card img { display: block; width: 250px; height: 110px; object-fit: cover; }
+	.card div { padding: 14px 16px 16px; font-size: 19px; font-weight: 600; }
+	.card span { display: block; margin-top: 8px; height: 8px; width: 80%; border-radius: 4px; background: #e2e8f0; }
+	.card span + span { width: 55%; margin-top: 7px; }
+</style>
+</head>
+<body>
+	<div class="text">
+		<div class="brand"><span class="logo">t</span>tools.jakob-r.de</div>
+		<h1>Small tools that just work.</h1>
+		<p>Converters and helpers that run entirely in your browser.</p>
+		<div class="lock">
+			<svg width="18" height="20" viewBox="0 0 18 20"><path d="M4 9V6a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="2.5" /><rect x="1" y="9" width="16" height="11" rx="3" fill="currentColor" /></svg>
+			Nothing is uploaded
+		</div>
+	</div>
+
+	<div class="grid">
+		<div class="card"><img src="../frontend/static/tools/markshift.svg" /><div>Markshift<span></span><span></span></div></div>
+		<div class="card"><img src="../frontend/static/tools/base64-encoder-decoder.svg" /><div>Base64 Encoder / Decoder<span></span><span></span></div></div>
+		<div class="card"><img src="../frontend/static/tools/gpx-cleaner.svg" /><div>GPX Cleaner<span></span><span></span></div></div>
+		<div class="card"><img src="../frontend/static/tools/driveway-planner.svg" /><div>Driveway Planner<span></span><span></span></div></div>
+	</div>
+</body>
+</html>

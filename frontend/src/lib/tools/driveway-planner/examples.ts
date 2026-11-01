@@ -12,7 +12,7 @@ export type Example = {
 	height: number;
 	buffer: number;
 	area: Vec[];
-	routes: { name: string; start: Pose; end: Pose }[];
+	routes: { name: string; start: Pose; via?: Pose; end: Pose }[];
 	/** SVG elements in meter coordinates. */
 	drawing: string;
 };
@@ -112,7 +112,7 @@ export const examples: Example[] = [
 	{
 		id: 'turning-in-the-yard',
 		title: 'Turning in the yard',
-		description: 'Through a gate into a courtyard and parked facing the exit, so the car has to turn or reverse in.',
+		description: 'In forwards through the gate (a via point just behind it), then a K-turn to park facing the exit.',
 		width: 24,
 		height: 26,
 		buffer: 0.25,
@@ -130,7 +130,14 @@ export const examples: Example[] = [
 			{ x: 9.4, y: 20 },
 			{ x: 0, y: 20 }
 		],
-		routes: [{ name: 'Park facing out', start: { x: 6, y: 23.5, th: EAST }, end: { x: 11.8, y: 11, th: DOWN } }],
+		routes: [
+			{
+				name: 'Park facing out',
+				start: { x: 6, y: 23.5, th: EAST },
+				via: { x: 11.8, y: 14.5, th: UP },
+				end: { x: 14.8, y: 11, th: DOWN }
+			}
+		],
 		drawing:
 			lot(24, 20) +
 			street(20, 24, 6) +
@@ -154,6 +161,7 @@ export function exampleSvg(ex: Example, withRoutes = false) {
 		? ex.routes
 				.flatMap((r) => [
 					[r.start, '#16a34a'],
+					...(r.via ? ([[r.via, '#ca8a04']] as const) : []),
 					[r.end, '#1e293b']
 				] as const)
 				.map(

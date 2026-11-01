@@ -242,7 +242,7 @@
 				union: true,
 				car: { ...presets[0] },
 				start: r.start,
-				via: null,
+				via: r.via ?? null,
 				end: r.end,
 				spline: null
 			}))

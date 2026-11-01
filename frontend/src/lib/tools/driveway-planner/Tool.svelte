@@ -185,6 +185,22 @@
 		layers = s.layers.length ? s.layers.map((l) => ({ ...newLayer(), ...l })) : [newLayer()];
 		activeId = (layers[s.active] ?? layers[0]).id;
 		requestAnimationFrame(() => canvas?.fit());
+		if (!plan && s.plan) restoreExamplePlan(s.plan);
+	}
+
+	/** A shared link only carries the plan's name and size; an example plan can be regenerated from those. */
+	async function restoreExamplePlan(info: NonNullable<SharedState['plan']>) {
+		const ex = examples.find((e) => `${e.id}.svg` === info.name);
+		if (!ex) return;
+		try {
+			const img = await importPlan(new File([exampleSvg(ex)], info.name, { type: 'image/svg+xml' }));
+			// Skip if another plan was opened meanwhile or the drawing belongs to a different size.
+			if (plan || planInfo?.name !== info.name || img.width !== info.width || img.height !== info.height) return;
+			plan = img;
+			requestAnimationFrame(() => canvas?.fit());
+		} catch {
+			// The "open the plan again" prompt stays.
+		}
 	}
 
 	// --- Saved files: the same state as JSON, with the background embedded as Base64 ----------

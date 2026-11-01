@@ -2,6 +2,7 @@
 	import CopyButton from '#lib/core/CopyButton.svelte';
 	import InfoHint from '#lib/core/InfoHint.svelte';
 	import type { MultiPolygon } from 'polygon-clipping';
+	import { untrack } from 'svelte';
 	import { presets, rearFromFront, type Car } from './cars';
 	import { dist, type Pose, type Vec } from './geometry';
 	import { exportPng, exportSvg } from './exportPlan';
@@ -447,6 +448,15 @@
 			else raf = requestAnimationFrame(tick);
 		});
 		return () => cancelAnimationFrame(raf);
+	});
+
+	// Another route starts from the beginning.
+	$effect(() => {
+		void activeId;
+		untrack(() => {
+			playing = false;
+			playPos = 0;
+		});
 	});
 
 	function togglePlay() {

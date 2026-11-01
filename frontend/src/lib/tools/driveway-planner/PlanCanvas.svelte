@@ -8,7 +8,7 @@
 	import type { Car } from './cars';
 	import { dist, segmentDistance, type Pose, type Vec } from './geometry';
 	import { drawCar, drawScene, path, sceneBounds, type LayerScene, type Scene } from './render';
-	import { insertPoint, removePoint, type Spline } from './spline';
+	import { dragPoint, insertPoint, removePoint, type Spline } from './spline';
 
 	let {
 		scene,
@@ -36,7 +36,7 @@
 	type Drag =
 		| { kind: 'pan'; x: number; y: number; ox: number; oy: number }
 		| { kind: 'marker'; which: MarkerKind; turn: boolean }
-		| { kind: 'spline'; i: number }
+		| { kind: 'spline'; i: number; from?: Spline }
 		| { kind: 'area'; i: number }
 		| { kind: 'ruler' }
 		| { kind: 'place'; which: MarkerKind; at: Vec };
@@ -130,6 +130,9 @@
 			const h = hit(w);
 			selected = h.kind === 'spline' ? { kind: h.kind, i: h.i } : null;
 			drag = h.kind === 'none' ? pan() : h;
+			// Neighbors give way relative to the spline as it was when the drag began, so
+			// dragging back undoes it.
+			if (drag.kind === 'spline') drag.from = active?.spline ?? undefined;
 		}
 		dragging = drag !== null && drag.kind !== 'pan';
 	}
@@ -157,8 +160,15 @@
 					onmarker(drag.which, { ...drag.at, th: Math.atan2(w.y - drag.at.y, w.x - drag.at.x) });
 				break;
 			case 'spline': {
+				const { i, from } = drag;
 				const s = active?.spline;
-				if (s) onspline({ ...s, pts: s.pts.map((p, i) => (i === (drag as { i: number }).i ? w : p)) });
+				if (!s || !from || !active?.start || !active.end) break;
+				// Alt moves just this point.
+				onspline(
+					e.altKey
+						? { ...s, pts: s.pts.map((p, k) => (k === i ? w : p)) }
+						: dragPoint(active.car, from, i, w, active.start.th, active.end.th)
+				);
 				break;
 			}
 			case 'area':

@@ -3,7 +3,7 @@
 // trailer (tractrix), so every spline describes exactly one drive that can then be checked.
 
 import { footprint, frontAxle, type Car } from './cars';
-import { dist, shapeInside, wrap, type Pose, type Vec } from './geometry';
+import { cross, dist, shapeInside, sub, wrap, type Pose, type Vec } from './geometry';
 
 export type Spline = {
 	pts: Vec[];
@@ -82,10 +82,14 @@ export function segments(s: Spline) {
 	return s.gears.map((gear, i) => ({ gear, pts: s.pts.slice(bounds[i], bounds[i + 1] + 1) }));
 }
 
-/** Dense points along the spline (centripetal Catmull-Rom per segment) with their gear. */
-export function evaluate(s: Spline): { p: Vec; gear: number }[] {
-	const out: { p: Vec; gear: number }[] = [{ p: s.pts[0], gear: s.gears[0] }];
-	for (const { gear, pts } of segments(s)) {
+/**
+ * Dense points along the spline (centripetal Catmull-Rom per segment) with their gear and the
+ * control point that starts their span.
+ */
+export function evaluate(s: Spline): { p: Vec; gear: number; span: number }[] {
+	const out: { p: Vec; gear: number; span: number }[] = [{ p: s.pts[0], gear: s.gears[0], span: 0 }];
+	const starts = [0, ...s.cusps];
+	for (const [g, { gear, pts }] of segments(s).entries()) {
 		const n = pts.length;
 		for (let i = 0; i < n - 1; i++) {
 			const p1 = pts[i];
@@ -93,7 +97,7 @@ export function evaluate(s: Spline): { p: Vec; gear: number }[] {
 			const p0 = i > 0 ? pts[i - 1] : phantom(pts[0], pts[1], pts[2]);
 			const p3 = i + 2 < n ? pts[i + 2] : phantom(pts[n - 1], pts[n - 2], pts[n - 3]);
 			const steps = Math.max(1, Math.ceil(dist(p1, p2) / EVAL_STEP));
-			for (let k = 1; k <= steps; k++) out.push({ p: catmullRom(p0, p1, p2, p3, k / steps), gear });
+			for (let k = 1; k <= steps; k++) out.push({ p: catmullRom(p0, p1, p2, p3, k / steps), gear, span: starts[g] + i });
 		}
 	}
 	return out;
@@ -287,4 +291,103 @@ export function joinSplines(a: Spline, b: Spline): Spline {
 		cusps: [...a.cusps, ...(gearChange ? [j] : []), ...shift],
 		gears: [...a.gears, ...(gearChange ? b.gears : b.gears.slice(1))]
 	};
+}
+
+/**
+ * Move control point `i` to `p` and let its neighbors give way where the route would need more
+ * steering than the car has. Bending no more sharply than the front axle turns at full lock
+ * (curvature sin(max steer) / wheelbase) is always drivable, so points pushed past that drag the
+ * next ones along. Corners the route already had (steering while standing, e.g. at the start of
+ * a planned turn) may stay, until driving shows that they no longer fit. The ends of the route,
+ * their directions and the moved point stay put. Spots that needed too much steering before the
+ * move are left alone.
+ */
+export function dragPoint(car: Car, s: Spline, i: number, p: Vec, startTh: number, endTh: number): Spline {
+	const maxSteer = (car.maxSteerDeg * Math.PI) / 180;
+	const spans = evaluate(s).map((e) => e.span);
+	const sharpSpans = (t: Spline) => {
+		const d = drive(car, 0, [], t, startTh, endTh);
+		const out = new Set<number>();
+		d.steer.forEach((st, k) => {
+			// As in `drive`: right next to a gear change the car steers standing still.
+			if (Math.abs(st) > maxSteer && !d.gears.slice(Math.max(0, k - 2), k + 3).some((g) => g !== d.gears[k]))
+				out.add(spans[k]);
+		});
+		return out;
+	};
+	const before = sharpSpans(s);
+	// Fixed points one step before the start and after the end, in the driving direction there.
+	const ahead = (q: Vec, r: Vec, th: number, g: number) => {
+		const d = g * dist(q, r);
+		return { x: q.x + d * Math.cos(th), y: q.y + d * Math.sin(th) };
+	};
+	const withEnds = (q: Vec[]) => [
+		ahead(q[0], q[1], startTh, -s.gears[0]),
+		...q,
+		ahead(q[q.length - 1], q[q.length - 2], endTh, s.gears[s.gears.length - 1])
+	];
+	const orig = withEnds(s.pts);
+	const pts = withEnds(s.pts.map((q, k) => (k === i ? p : q))).map((q) => ({ ...q }));
+	const n = pts.length;
+	// A little under the limit: between the points the spline bends somewhat more.
+	const maxK = (0.9 * Math.sin(maxSteer)) / car.wheelbase;
+	const free = pts.map((_, k) => (k <= 1 || k >= n - 2 || k === i + 1 ? 0 : 1));
+	const bend = (a: Vec, b: Vec, c: Vec) =>
+		(2 * Math.abs(cross(sub(b, a), sub(c, b)))) / (dist(a, b) * dist(b, c) * dist(a, c) || Infinity);
+	// Bends at cusps don't count (the car stops there).
+	const cusps = new Set(s.cusps.map((c) => c + 1));
+	const limit = pts.map((_, k) =>
+		k === 0 || k === n - 1 || cusps.has(k)
+			? Infinity
+			: k === i + 1
+				? maxK
+				: Math.max(maxK, bend(orig[k - 1], orig[k], orig[k + 1]))
+	);
+	const result = () => ({ ...s, pts: pts.slice(1, -1) });
+	for (let round = 0; round < 8; round++) {
+		for (let iter = 0; iter < 300; iter++) {
+			let worst = 0;
+			for (let k = 1; k < n - 1; k++) {
+				const [a, b, c] = [pts[k - 1], pts[k], pts[k + 1]];
+				const kb = bend(a, b, c);
+				if (kb <= limit[k]) continue;
+				worst = Math.max(worst, kb / limit[k]);
+				// Pull b toward the line a–c (and a, c toward b) until the bend is at the limit;
+				// the bend grows about linearly with b's distance from that line.
+				const ac = sub(c, a);
+				const len = Math.hypot(ac.x, ac.y) || 1;
+				const nrm = { x: -ac.y / len, y: ac.x / len };
+				const excess = (cross(ac, sub(b, a)) / len) * (1 - limit[k] / kb);
+				const wsum = free[k - 1] / 4 + free[k] + free[k + 1] / 4;
+				if (!wsum) continue;
+				const lam = excess / wsum;
+				b.x -= free[k] * lam * nrm.x;
+				b.y -= free[k] * lam * nrm.y;
+				for (const j of [k - 1, k + 1]) {
+					pts[j].x += (free[j] / 2) * lam * nrm.x;
+					pts[j].y += (free[j] / 2) * lam * nrm.y;
+				}
+			}
+			// Moved points keep halfway between their neighbors along the route, or they bunch up.
+			for (let k = 1; k < n - 1; k++) {
+				if (!free[k] || cusps.has(k) || (pts[k].x === orig[k].x && pts[k].y === orig[k].y)) continue;
+				const [a, b, c] = [pts[k - 1], pts[k], pts[k + 1]];
+				const ac = sub(c, a);
+				const len2 = ac.x * ac.x + ac.y * ac.y || 1;
+				const t = ((b.x - (a.x + c.x) / 2) * ac.x + (b.y - (a.y + c.y) / 2) * ac.y) / len2;
+				b.x -= 0.5 * t * ac.x;
+				b.y -= 0.5 * t * ac.y;
+			}
+			if (worst < 1.001) break;
+		}
+		const bad = [...sharpSpans(result())].filter((j) => !before.has(j));
+		if (!bad.length) break;
+		// Corners near where it still needs too much steering go.
+		let changed = false;
+		for (const j of bad)
+			for (let k = Math.max(1, j - 2); k <= Math.min(n - 2, j + 4); k++)
+				if (Number.isFinite(limit[k]) && limit[k] > maxK) [limit[k], changed] = [maxK, true];
+		if (!changed) break;
+	}
+	return result();
 }

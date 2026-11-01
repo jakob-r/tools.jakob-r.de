@@ -875,7 +875,7 @@
 										>
 										{#if l.spline}
 											<InfoHint
-												text="The solid line is the middle of the front axle, the dashed one the rear axle. Drag its points to edit, double-click it to add a point, select one and press Delete to remove it. Diamonds are gear changes. Red means the car cannot drive it."
+												text="The solid line is the middle of the front axle, the dashed one the rear axle. Drag its points to edit; where a point would bend too sharply for the car, its neighbors follow (hold Alt to move just the one point). Double-click it to add a point, select one and press Delete to remove it. Diamonds are gear changes. Red means the car cannot drive it."
 											/>
 										{/if}
 										<button

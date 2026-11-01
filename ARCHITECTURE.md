@@ -72,7 +72,7 @@ Clipboard and files use browser APIs only (`navigator.clipboard`, `<input type="
 - Prefer small dependencies. A tool that can use the platform (Base64, `JSON.parse`, clipboard, files) should not take on a library or a Wasm module for that. Use Wasm when the local work is heavy enough, or when the useful implementation is already Wasm.
 - Shared controls come from `frontend/src/lib/core/`. A one-off control stays inside the tool module.
 - The landing page states that data never leaves the browser.
-- Landing pages end with a small footer linking "by jakob-r" to https://www.jakob-r.de/coding/ (which carries the legal notice). Tool pages have no footer.
+- Landing pages end with a small footer: "by jakob-r" (→ https://www.jakob-r.de/coding/), source code, license (if the repo has one), and the legal notice and privacy pages on jakob-r.de. Tool pages have no footer.
 
 ## Production
 

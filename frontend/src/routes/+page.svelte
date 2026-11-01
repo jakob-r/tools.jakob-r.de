@@ -50,7 +50,13 @@
 		{/each}
 	</div>
 
-	<footer class="mt-10 border-t border-line pt-6 text-center text-sm text-mute">
+	<footer class="mt-10 flex flex-wrap justify-center gap-x-2 gap-y-1 border-t border-line pt-6 text-sm text-mute">
 		<a href="https://www.jakob-r.de/coding/" class="underline underline-offset-4 hover:text-accent">by jakob-r</a>
+		<span aria-hidden="true">·</span>
+		<a href="https://github.com/jakob-r/tools.jakob-r.de" class="underline underline-offset-4 hover:text-accent">Source</a>
+		<span aria-hidden="true">·</span>
+		<a href="https://www.jakob-r.de/legal-notice/" class="underline underline-offset-4 hover:text-accent">Legal notice</a>
+		<span aria-hidden="true">·</span>
+		<a href="https://www.jakob-r.de/privacy/" class="underline underline-offset-4 hover:text-accent">Privacy</a>
 	</footer>
 </div>

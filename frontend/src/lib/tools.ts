@@ -28,5 +28,12 @@ export const tools: Tool[] = [
 		description: 'One-click cleanup for GPS tracks: removes spikes, pause drift and the drive home. Compare before and after.',
 		tags: ['gpx', 'gps', 'track', 'fitness'],
 		thumbnail: '/tools/gpx-cleaner.svg'
+	},
+	{
+		slug: 'driveway-planner',
+		title: 'Driveway Planner',
+		description: 'Find a drivable path for your car on a property plan, K-turns included, and get the area the driveway needs.',
+		tags: ['driveway', 'car', 'turning circle', 'planning'],
+		thumbnail: '/tools/driveway-planner.svg'
 	}
 ];

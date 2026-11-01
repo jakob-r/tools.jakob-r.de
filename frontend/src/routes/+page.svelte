@@ -49,4 +49,8 @@
 			<p class="text-mute">No tools match “{query}”.</p>
 		{/each}
 	</div>
+
+	<footer class="mt-10 border-t border-line pt-6 text-center text-sm text-mute">
+		<a href="https://www.jakob-r.de/coding/" class="underline underline-offset-4 hover:text-accent">by jakob-r</a>
+	</footer>
 </div>

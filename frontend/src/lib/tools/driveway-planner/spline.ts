@@ -155,30 +155,67 @@ export function drive(
 	const L = car.wheelbase;
 	// 2° of slack: the spline only approximates arcs, and turning-circle figures are rounded.
 	const maxSteer = ((car.maxSteerDeg + 2) * Math.PI) / 180;
-	let th = startTh;
-	const poses: Pose[] = [];
-	const steer: number[] = [];
-	const front: Vec[] = [];
-	const gears: number[] = [];
-	for (let i = 0; i < samples.length; i++) {
-		const f = samples[i].p;
-		let delta = 0;
-		if (i > 0) {
-			const dx = f.x - samples[i - 1].p.x;
-			const dy = f.y - samples[i - 1].p.y;
-			// θ' = (Ḟ · n) / L with n the heading normal; midpoint rule.
-			const dTh = (h: number) => (-dx * Math.sin(h) + dy * Math.cos(h)) / L;
-			const mid = th + dTh(th) / 2;
-			const along = dx * Math.cos(mid) + dy * Math.sin(mid);
-			const across = -dx * Math.sin(mid) + dy * Math.cos(mid);
-			delta = Math.atan2(across, Math.abs(along)) * (along < 0 ? -1 : 1);
-			th += dTh(mid);
+	const front = samples.map((s) => s.p);
+	const gears = samples.map((s) => s.gear);
+	const n = samples.length;
+	// Heading after moving the front axle from a to b; θ' = (Ḟ · n) / L with n the heading
+	// normal, midpoint rule.
+	const move = (h: number, a: Vec, b: Vec) => {
+		const dTh = (h: number) => (-(b.x - a.x) * Math.sin(h) + (b.y - a.y) * Math.cos(h)) / L;
+		return h + dTh(h + dTh(h) / 2);
+	};
+	// Reversing, the rear axle is pushed like a trailer: integrated forward, any small error in
+	// the spline doubles about every 1.2 wheelbases and the car seems to swerve off. Integrated
+	// backward from where the run ends it is stable, so reverse runs are driven that way: the
+	// final run from the end direction, one ending in a gear change from the heading there that
+	// fits the start of the run best. What is left at the start is steered out within about a
+	// wheelbase.
+	const ths = [startTh];
+	let reverseOff = 0;
+	for (let a = 0; a < n - 1; ) {
+		let b = a + 1;
+		while (b + 1 < n && gears[b + 1] === gears[a + 1]) b++;
+		if (gears[a + 1] > 0) for (let i = a + 1; i <= b; i++) ths[i] = move(ths[i - 1], front[i - 1], front[i]);
+		else {
+			const back: number[] = [];
+			const backFrom = (end: number) => {
+				back[b] = end;
+				for (let i = b; i > a; i--) back[i - 1] = move(back[i], front[i], front[i - 1]);
+				return wrap(back[a] - ths[a]);
+			};
+			if (b === n - 1) backFrom(endTh);
+			else {
+				// At the gear change the front wheels point at most the steering limit off the
+				// heading. Within that the start heading grows with the end heading: bisect.
+				const t = Math.atan2(front[b - 1].y - front[b].y, front[b - 1].x - front[b].x);
+				let [lo, hi] = [t - maxSteer, t + maxSteer];
+				for (let k = 0; k < 24; k++) {
+					const mid = (lo + hi) / 2;
+					if (backFrom(mid) < 0) lo = mid;
+					else hi = mid;
+				}
+				backFrom((lo + hi) / 2);
+			}
+			const off = wrap(ths[a] - back[a]);
+			reverseOff = Math.max(reverseOff, Math.abs(off));
+			let s = 0;
+			for (let i = a + 1; i <= b; i++) {
+				s += dist(front[i], front[i - 1]);
+				ths[i] = ths[a] - off + (back[i] - back[a]) + off * Math.exp(-s / L);
+			}
 		}
-		front.push(f);
-		poses.push({ x: f.x - L * Math.cos(th), y: f.y - L * Math.sin(th), th });
-		steer.push(delta);
-		gears.push(samples[i].gear);
+		a = b;
 	}
+	const poses: Pose[] = ths.map((th, i) => ({ x: front[i].x - L * Math.cos(th), y: front[i].y - L * Math.sin(th), th }));
+	const steer = ths.map((th, i) => {
+		if (i === 0) return 0;
+		const dx = front[i].x - front[i - 1].x;
+		const dy = front[i].y - front[i - 1].y;
+		const mid = ths[i - 1] + wrap(th - ths[i - 1]) / 2;
+		const along = dx * Math.cos(mid) + dy * Math.sin(mid);
+		const across = -dx * Math.sin(mid) + dy * Math.cos(mid);
+		return Math.atan2(across, Math.abs(along)) * (along < 0 ? -1 : 1);
+	});
 	steer[0] = steer[1] ?? 0;
 
 	const bounded = area.length >= 3;
@@ -197,8 +234,10 @@ export function drive(
 	const problems: string[] = [];
 	if (tooSharp) problems.push(`Needs more than ${car.maxSteerDeg}° of steering`);
 	if (outside) problems.push('The car leaves the area');
-	const off = Math.abs(wrap(th - endTh)) * (180 / Math.PI);
+	const off = Math.abs(wrap(ths[n - 1] - endTh)) * (180 / Math.PI);
 	if (off > 5) problems.push(`Ends ${Math.round(off)}° off the end direction`);
+	const jump = reverseOff * (180 / Math.PI);
+	if (jump > 5) problems.push(`Starts reversing ${Math.round(jump)}° off the path`);
 	// A little more slack than the planner gets, for the spline fitted to its result.
 	if (
 		via &&
